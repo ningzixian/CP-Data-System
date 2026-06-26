@@ -1,0 +1,181 @@
+/**
+ * 阴极保护数据系统全局状态
+ *
+ * 数据流：
+ *   启动 → loadAll() 并发请求后端 API + 从 facilities.ts 加载真实 CSV
+ *        → units / points / pipes / regulators / inlets 全部就位
+ */
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { pipelinesApi } from '@/api/pipelines'
+import { recordsApi } from '@/api/records'
+import { dashboardApi } from '@/api/dashboard'
+import { fetchItems } from '@/api/items'
+import { loadFacilities, type FacilitiesData } from '@/utils/facilities'
+import { USE_MOCK } from '@/api/client'
+import type {
+  Pipeline, CorrosionUnit, InspectionPoint, InspectionRecord,
+  DashboardData, InspectionItemDef, InspectionStatus, RecordStatus,
+} from '@/types/models'
+
+export const useCpStore = defineStore('cp', () => {
+  // 业务数据
+  const pipelines = ref<Pipeline[]>([])
+  const records = ref<InspectionRecord[]>([])
+  const dashboard = ref<DashboardData | null>(null)
+  const items = ref<InspectionItemDef[]>([])
+  const loading = ref(false)
+
+  // 现场设施数据（来自 CSV）
+  const units = ref<CorrosionUnit[]>([])
+  const points = ref<InspectionPoint[]>([])
+  const facilities = ref<FacilitiesData | null>(null)
+
+  // 选中 / hover
+  const selectedUnit = ref<CorrosionUnit | null>(null)
+  const hoveredUnit = ref<CorrosionUnit | null>(null)
+
+  const stats = computed(() => ({
+    total: dashboard.value?.total_units ?? 0,
+    completed: dashboard.value?.completed ?? 0,
+    in_progress: dashboard.value?.in_progress ?? 0,
+    pending: dashboard.value?.pending ?? 0,
+    exception: dashboard.value?.exception ?? 0,
+  }))
+
+  /**
+   * 整体加载：业务 API + 现场设施 CSV 一起拉
+   * - 后端联调时（USE_MOCK=false），units/points 由后端 API 返回
+   * - mock 模式下，units/points 由 public/data/ 下的 CSV 加载（不需要真实后端）
+   */
+  async function loadAll() {
+    loading.value = true
+    try {
+      const [fac, p, its, r] = await Promise.all([
+        loadFacilities(),
+        pipelinesApi.list(),
+        fetchItems(),
+        recordsApi.list(),
+      ])
+
+      facilities.value = fac
+      units.value = fac.units
+      pipelines.value = p
+      items.value = its
+      records.value = r
+
+      // 关键：把 records 算出来的进度回写到 units（让地图上圆圈颜色变化）
+      // 不用 fac.units 直接修改（会污染源数据），用 Object.assign 复制
+      units.value = fac.units.map((u) => {
+        const recs = r.filter((x) => x.unit_id === u.id)
+        const completed = recs.filter((x) => x.status === 'passed' || x.status === 'exception').length
+        const total = its.length
+        const progress = total ? completed / total : 0
+        let status: InspectionStatus = 'pending'
+        if (progress >= 1) status = 'completed'
+        else if (progress > 0) status = 'in_progress'
+        return { ...u, inspection_progress: progress, inspection_status: status }
+      })
+
+      console.log('[store] loadAll: units=', fac.units.length, 'records=', r.length)
+      console.log('[store] unit progress:', units.value.map((u) => `${u.name}=${Math.round(u.inspection_progress*100)}%/${u.inspection_status}`).join(', '))
+
+      // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
+      points.value = fac.joints
+        .filter((j) => j.unit_id !== undefined)
+        .map((j): InspectionPoint => ({
+          id: j.fid,
+          unit_id: j.unit_id!,
+          point_type: '绝缘接头',
+          lng: j.lng,
+          lat: j.lat,
+          mileage: 0,
+          bd_coord: '',
+          location_desc: `${j.type}｜${j.pressured}`,
+          created_at: new Date().toISOString(),
+        }))
+
+      // Dashboard：mock 模式下前端自己算（基于真实 units + records）；
+      //            真实后端模式下走后端 API
+      if (USE_MOCK) {
+        dashboard.value = computeDashboard()
+      } else {
+        dashboard.value = await dashboardApi.get()
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 客户端计算 dashboard（mock 模式用，避免和真实 units 不一致）
+   * 后端联调时此函数可不调用，走 /api/dashboard 即可
+   */
+  function computeDashboard(): DashboardData {
+    if (!facilities.value) {
+      return { total_units: 0, completed: 0, in_progress: 0, pending: 0, exception: 0, rows: [], items: [] }
+    }
+    const itemsDef = items.value.map((it) => ({ code: it.code, name: it.name }))
+    // 用最新的 units（已经算过 progress/status）
+    const rows = units.value.map((u) => {
+      const recs = records.value.filter((r) => r.unit_id === u.id)
+      const recMap = new Map(recs.map((r) => [r.item_code, r.status]))
+      return {
+        unit_id: u.id,
+        unit_name: u.name,
+        lng: u.lng,
+        lat: u.lat,
+        progress: u.inspection_progress,
+        status: u.inspection_status,
+        items: itemsDef.map((it) => ({
+          code: it.code,
+          name: it.name,
+          status: (recMap.get(it.code) ?? 'pending') as RecordStatus,
+        })),
+      }
+    })
+    return {
+      total_units: rows.length,
+      completed: rows.filter((r) => r.status === 'completed').length,
+      in_progress: rows.filter((r) => r.status === 'in_progress').length,
+      pending: rows.filter((r) => r.status === 'pending').length,
+      exception: rows.filter((r) => r.status === 'exception').length,
+      rows,
+      items: itemsDef,
+    }
+  }
+
+  function unitName(id: number) {
+    return units.value.find((u) => u.id === id)?.name || `#${id}`
+  }
+
+  function getItemStatus(unitId: number, code: string) {
+    const rec = records.value.find((r) => r.unit_id === unitId && r.item_code === code)
+    return rec?.status || 'pending'
+  }
+
+  function selectUnit(u: CorrosionUnit | null) {
+    selectedUnit.value = u
+  }
+
+  function hoverUnit(u: CorrosionUnit | null) {
+    hoveredUnit.value = u
+  }
+
+  /** 该单元关联的绝缘接头数量 */
+  function unitJointCount(unitId: number): number {
+    return facilities.value?.jointCountByUnit[unitId] ?? 0
+  }
+
+  /** 该单元关联的引入口数量 */
+  function unitInletCount(unitId: number): number {
+    return facilities.value?.inletCountByUnit[unitId] ?? 0
+  }
+
+  return {
+    pipelines, units, points, records, dashboard, items, loading,
+    facilities, selectedUnit, hoveredUnit, stats,
+    loadAll, unitName, getItemStatus, selectUnit, hoverUnit,
+    unitJointCount, unitInletCount,
+  }
+})

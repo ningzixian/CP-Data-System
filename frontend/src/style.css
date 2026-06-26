@@ -1,0 +1,279 @@
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: #f5f7fa;
+  color: #303133;
+}
+
+* { box-sizing: border-box; }
+
+.app-header {
+  height: 56px;
+  background: linear-gradient(135deg, #1f3a5f, #2c5282);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.app-header .logo {
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-header .logo small {
+  font-weight: 400;
+  opacity: 0.75;
+  font-size: 13px;
+  margin-left: 6px;
+}
+
+.app-header .spacer { flex: 1; }
+
+.app-header .nav-btn {
+  color: #fff;
+  opacity: 0.85;
+  padding: 0 16px;
+  cursor: pointer;
+  font-size: 14px;
+  height: 56px;
+  line-height: 56px;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.app-header .nav-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+
+.app-header .nav-btn.active {
+  opacity: 1;
+  border-bottom-color: #409eff;
+  background: rgba(255,255,255,0.06);
+}
+
+.main-content {
+  display: flex;
+  height: calc(100vh - 56px);
+}
+
+.side-panel {
+  width: 360px;
+  background: #fff;
+  border-right: 1px solid #ebeef5;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.map-panel {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+#map { width: 100%; height: 100%; }
+
+.unit-card {
+  margin: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.unit-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 12px rgba(64,158,255,0.15);
+  transform: translateY(-1px);
+}
+
+.unit-card.active {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.unit-card .name {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.unit-card .addr {
+  color: #909399;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.unit-card .progress-bar { margin: 8px 0; }
+
+/* 小区分组（可折叠，带 el-collapse 自带过渡动效） */
+.community-collapse {
+  border-top: 1px solid #ebeef5;
+  border-bottom: 1px solid #ebeef5;
+}
+.community-collapse :deep(.el-collapse-item__header) {
+  background: #f5f7fa;
+  /* 用 !important 覆盖 Element Plus 默认 padding-left: 48px（原本留给 arrow） */
+  padding: 0 16px !important;
+  height: auto;
+  min-height: 44px;
+  border-bottom: none;
+  transition: background 0.15s;
+}
+.community-collapse :deep(.el-collapse-item__header:hover) {
+  background: #ecf5ff;
+}
+/* 隐藏 el-collapse 自带箭头，用我们自定义的 chevron */
+.community-collapse :deep(.el-collapse-item__arrow) {
+  display: none;
+}
+.community-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+.community-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 0;
+}
+.community-header {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  /* 没有 chevron 占位，靠 padding-left 把小区名向右推，视觉对齐 */
+  padding-left: 16px;
+  margin-left: 12px;
+}
+.community-header .name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+.community-header .meta {
+  font-size: 12px;
+  color: #909399;
+  margin-left: auto;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: #fff;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.stats-bar .stat-item {
+  flex: 1;
+  text-align: center;
+  padding: 8px 4px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+
+.stats-bar .stat-item .num {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.stats-bar .stat-item .label { font-size: 11px; color: #909399; margin-top: 2px; }
+
+.map-legend {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 14px;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  z-index: 1000;
+  font-size: 12px;
+  backdrop-filter: blur(4px);
+}
+
+.map-legend .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.map-legend > div { padding: 2px 0; }
+
+.unit-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* 进度圆圈容器：固定 46×46，内部 div 动态大小（默认 38，hover/selected 变 46），始终居中 */
+.unit-progress-marker {
+  background: transparent !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.inspection-form { padding: 0 8px; }
+
+.status-tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.status-pending { background: #f4f4f5; color: #909399; }
+.status-passed, .status-completed { background: #f0f9eb; color: #67c23a; }
+.status-exception { background: #fef0f0; color: #f56c6c; }
+.status-in_progress { background: #fdf6ec; color: #e6a23c; }
+
+.page-container {
+  padding: 20px;
+  overflow: auto;
+  height: calc(100vh - 56px);
+}
+
+.empty-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #909399;
+  font-size: 14px;
+}
+
+/* 去掉 Leaflet poly 被点击后的浏览器黑色 focus outline（SVG 元素的可访问性焦点环） */
+.leaflet-interactive,
+.leaflet-interactive:focus,
+.leaflet-interactive:active {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+svg.leaflet-zoom-animated path.leaflet-interactive,
+svg.leaflet-zoom-animated path.leaflet-interactive:focus {
+  outline: none !important;
+}
+
+@media (max-width: 768px) {
+  .main-content { flex-direction: column; }
+  .side-panel { width: 100%; height: 40vh; border-right: none; border-top: 1px solid #ebeef5; order: 2; }
+  .map-panel { order: 1; height: 60vh; }
+  .app-header .nav-btn { padding: 0 8px; font-size: 13px; }
+  .app-header .logo small { display: none; }
+}
