@@ -17,6 +17,21 @@ const isActive = computed(() => store.selectedUnit?.id === props.unit.id)
 const jointCount = computed(() => store.unitJointCount(props.unit.id))
 const inletCount = computed(() => store.unitInletCount(props.unit.id))
 
+/** 进度条自定义颜色函数（按单元状态 + 进度分档，全部用 color 不用 status 避免内置图标）
+ *  - exception → 红 #f56c6c（异常优先）
+ *  - 100%      → 绿 #67c23a
+ *  - 80-99%    → 橙 #e6a23c（即将完成）
+ *  - 1-79%     → 蓝 #409eff
+ *  - 0%        → 浅灰 #909399
+ */
+function progressColor(percentage: number): string {
+  if (props.unit.inspection_status === 'exception') return '#f56c6c'
+  if (percentage >= 100) return '#67c23a'
+  if (percentage > 80) return '#e6a23c'
+  if (percentage > 0) return '#409eff'
+  return '#909399'
+}
+
 function click() {
   store.selectUnit(props.unit)
   emit('select', props.unit)
@@ -41,13 +56,21 @@ function openDetail() {
       <span>{{ unit.name }}</span>
       <StatusTag :status="unit.inspection_status" />
     </div>
-    <div class="addr">📍 {{ unit.address || '—' }}</div>
+    <div class="addr">
+      <svg class="location-icon" viewBox="0 0 24 24" width="12" height="12">
+        <path d="M12 2 C7.6 2 4 5.6 4 10 C4 14 12 22 12 22 C12 22 20 14 20 10 C20 5.6 16.4 2 12 2 Z"
+              fill="none" stroke="#909399" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="12" cy="10" r="2.5" fill="none" stroke="#909399" stroke-width="2"/>
+      </svg>
+      <span>{{ unit.address || '—' }}</span>
+    </div>
     <div class="progress-bar">
       <el-progress
         :percentage="Math.round(unit.inspection_progress * 100)"
         :stroke-width="8"
         :show-text="true"
-        :status="unit.inspection_status === 'exception' ? 'exception' : (unit.inspection_status === 'completed' ? 'success' : '')"
+        :status="Math.round(unit.inspection_progress * 100) >= 100 ? 'success' : ''"
+        :color="progressColor"
       />
     </div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:#606266">

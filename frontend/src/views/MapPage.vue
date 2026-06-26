@@ -12,8 +12,48 @@ const mapRef = ref<InstanceType<typeof MapView> | null>(null)
 
 const drawerOpen = ref(false)
 const activeTab = ref('')
-// 小区折叠面板：默认展开（['nanhai'] 表示展开，[] 表示收起）
-const communityActive = ref<string[]>(['nanhai'])
+
+/** 小区列表（按地址前缀分组）
+ *  - 第一项南海家园七里是真实数据，来自 store.units
+ *  - 第二项南海家园六里暂无数据（占位，等后续接入）
+ *  - avgProgress：该小区所有单元的平均检测进度
+ *  - hasException：小区内是否任一单元异常（用于进度条 status）
+ */
+const communities = computed(() => [
+  {
+    name: '南海家园七里',
+    units: store.units,
+    avgProgress: avgProgress(store.units),
+    hasException: store.units.some((u) => u.inspection_status === 'exception'),
+  },
+  {
+    name: '南海家园六里',
+    units: [] as CorrosionUnit[],
+    avgProgress: 0,
+    hasException: false,
+  },
+])
+
+function avgProgress(units: CorrosionUnit[]) {
+  if (units.length === 0) return 0
+  return units.reduce((s, u) => s + (u.inspection_progress || 0), 0) / units.length
+}
+
+/** 小区进度条自定义颜色（按平均进度分档）
+ *  - 100%  → 绿 #67c23a
+ *  - 80-99% → 橙 #e6a23c
+ *  - 1-79%  → 蓝 #409eff
+ *  - 0%     → 浅灰 #909399
+ */
+function communityProgressColor(percentage: number): string {
+  if (percentage >= 100) return '#67c23a'
+  if (percentage > 80) return '#e6a23c'
+  if (percentage > 0) return '#409eff'
+  return '#909399'
+}
+
+// el-collapse accordion 模式：单值，展开一个会自动收起其他；默认全合上
+const communityActive = ref<string>('')
 
 function selectUnit(u: CorrosionUnit) {
   store.selectUnit(u)
@@ -29,6 +69,11 @@ function openDetail(u: CorrosionUnit) {
 
 function onDrawerClosed() {
   store.selectUnit(null)
+}
+
+/** 点击地图上的小区大圆 → 展开对应小区（accordion 模式直接覆盖） */
+function onCommunityFocus(name: string) {
+  communityActive.value = name
 }
 
 const selectedUnit = computed(() => store.selectedUnit)
@@ -75,22 +120,41 @@ const tabItems = computed(() =>
         </div>
       </div>
 
-      <!-- 小区分组（可折叠，带过渡动效） -->
-      <el-collapse v-model="communityActive" class="community-collapse">
-        <el-collapse-item name="nanhai">
+      <!-- 小区分组（el-collapse accordion 手风琴模式 + 卡片 staggered 展开动效） -->
+      <el-collapse v-model="communityActive" accordion class="community-collapse">
+        <el-collapse-item v-for="c in communities" :key="c.name" :name="c.name">
           <template #title>
-            <span class="community-header">
-              <span class="name">南海家园七里</span>
-              <span class="meta">{{ store.units.length }} 个单元</span>
-            </span>
+            <div class="community-header">
+              <span class="name">{{ c.name }}</span>
+              <el-progress
+                v-if="c.units.length > 0"
+                :percentage="Math.round(c.avgProgress * 100)"
+                :stroke-width="5"
+                :show-text="true"
+                :status="c.hasException ? 'exception' : ''"
+                :color="communityProgressColor"
+                :format="(p) => `${p}%`"
+                class="community-progress"
+              />
+              <span class="meta">{{ c.units.length }} 个单元</span>
+            </div>
           </template>
-          <UnitCard v-for="u in store.units" :key="u.id" :unit="u" @select="selectUnit" @detail="openDetail" />
+          <UnitCard
+            v-for="u in c.units"
+            :key="u.id"
+            :unit="u"
+            @select="selectUnit"
+            @detail="openDetail"
+          />
+          <div v-if="c.units.length === 0" class="community-empty">
+            暂无数据
+          </div>
         </el-collapse-item>
       </el-collapse>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" @select="selectUnit" @detail="openDetail" />
+      <MapView ref="mapRef" :units="store.units" :points="store.points" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" />
       <div class="map-legend">
         <div><span class="dot" style="background:#67c23a"></span>已完成</div>
         <div><span class="dot" style="background:#e6a23c"></span>进行中</div>

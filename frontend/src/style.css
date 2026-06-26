@@ -115,11 +115,17 @@ html, body, #app {
   color: #909399;
   font-size: 12px;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+}
+.unit-card .addr .location-icon {
+  flex-shrink: 0;
+  margin-right: 3px;
 }
 
 .unit-card .progress-bar { margin: 8px 0; }
 
-/* 小区分组（可折叠，带 el-collapse 自带过渡动效） */
+/* 小区分组（el-collapse + 干净 header 样式） */
 .community-collapse {
   border-top: 1px solid #ebeef5;
   border-bottom: 1px solid #ebeef5;
@@ -136,12 +142,13 @@ html, body, #app {
 .community-collapse :deep(.el-collapse-item__header:hover) {
   background: #ecf5ff;
 }
-/* 隐藏 el-collapse 自带箭头，用我们自定义的 chevron */
 .community-collapse :deep(.el-collapse-item__arrow) {
   display: none;
 }
 .community-collapse :deep(.el-collapse-item__wrap) {
   border-bottom: none;
+  /* wrap 高度过渡用弹性曲线，展开/收起平滑 */
+  transition: height 0.45s cubic-bezier(0.34, 1.4, 0.64, 1) !important;
 }
 .community-collapse :deep(.el-collapse-item__content) {
   padding-bottom: 0;
@@ -150,19 +157,46 @@ html, body, #app {
   display: flex;
   align-items: center;
   flex: 1;
+  width: 100%;
   /* 没有 chevron 占位，靠 padding-left 把小区名向右推，视觉对齐 */
   padding-left: 16px;
   margin-left: 12px;
+  gap: 8px;
 }
 .community-header .name {
   font-size: 14px;
   font-weight: 600;
   color: #303133;
+  flex-shrink: 0;
 }
 .community-header .meta {
   font-size: 12px;
   color: #909399;
+  flex-shrink: 0;
+  margin-right: 16px;  /* 往左移 10px（之前 6px） */
   margin-left: auto;
+}
+.community-header .community-progress {
+  flex: 1;
+  margin: 0 0 0 12px;
+  max-width: 140px;
+  min-width: 80px;
+}
+.community-header .community-progress :deep(.el-progress__text) {
+  font-size: 12px !important;
+  min-width: 32px;
+}
+
+/* 小区空数据提示 */
+.community-empty {
+  margin: 16px 24px;
+  padding: 32px 16px;
+  text-align: center;
+  color: #c0c4cc;
+  font-size: 13px;
+  background: #fafafa;
+  border: 1px dashed #ebeef5;
+  border-radius: 6px;
 }
 
 .stats-bar {

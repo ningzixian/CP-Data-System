@@ -233,8 +233,9 @@ const demoRecords: InspectionRecord[] = [
   ...makeDemoRecords(2, 2000, ['passed','passed','passed','passed','passed','passed','passed','passed','passed']),
   // id=3: 4 passed + 1 exception = 5/9 = 56% exception
   ...makeDemoRecords(3, 3000, ['passed','passed','passed','passed','exception','pending','pending','pending','pending']),
-  // id=4: 3 passed = 3/9 = 33% in_progress
-  ...makeDemoRecords(4, 4000, ['passed','passed','passed','pending','pending','pending','pending','pending','pending']),
+  // id=4 (FSKZ755902): 8 passed + 1 pending = 8/9 ≈ 89% in_progress
+  // （临时调高进度，用于测试进度条 > 80% 橙色效果）
+  ...makeDemoRecords(4, 4000, ['passed','passed','passed','passed','passed','passed','passed','passed','pending']),
   // id=5: 1 exception = 1/9 = 11% in_progress
   ...makeDemoRecords(5, 5000, ['exception','pending','pending','pending','pending','pending','pending','pending','pending']),
 ]

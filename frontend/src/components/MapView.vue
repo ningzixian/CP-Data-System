@@ -19,6 +19,7 @@ const AMAP_URL = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1
 const emit = defineEmits<{
   (e: 'select', u: CorrosionUnit): void
   (e: 'detail', u: CorrosionUnit): void
+  (e: 'community-focus', name: string): void
 }>()
 const store = useCpStore()
 
@@ -34,6 +35,15 @@ let jointLayer: LayerGroup | null = null      // 绝缘接头（红叉）
 let regulatorLayer: LayerGroup | null = null  // 调压箱
 let inletLayer: LayerGroup | null = null      // 引入口
 let unitMarkerLayer: LayerGroup | null = null // 单元业务标记（圆+百分比）
+
+// 缩放阈值：zoom < COMMUNITY_VIEW_ZOOM 时切换到"小区概览"模式
+// （隐藏管线/引入口/控制单元进度圆圈，显示小区合并多边形 + 大进度圆圈）
+const COMMUNITY_VIEW_ZOOM = 17
+let isCommunityView = false
+
+// 小区概览图层（zoom < 15 时显示）
+let communityLayer: LayerGroup | null = null
+let communityMarkerLayer: LayerGroup | null = null
 
 // ============== 图标 ==============
 function buildUnitMarkerIcon(status: string, progress: number) {
@@ -111,6 +121,41 @@ function buildInletIcon() {
       border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>`,
     iconSize: [14, 14],
     iconAnchor: [7, 7],
+  })
+}
+
+/** 小区进度大圆圈（小区概览模式使用）
+ *  - 显示百分比 + 小区名 + 单元数
+ *  - 颜色优先级（异常最高，进度次之）：
+ *      异常（任一单元 exception） → 红 #f56c6c
+ *      100%                        → 绿 #67c23a（已完成）
+ *      80-99%                      → 浅绿 #85ce61（即将完成）
+ *      1-79%                       → 橙 #e6a23c（进行中）
+ *      0%                          → 浅灰 #c0c4cc（未开始）
+ */
+function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress: number, hasException = false) {
+  const percent = Math.round(avgProgress * 100)
+  const color = hasException ? '#f56c6c'
+    : avgProgress >= 1 ? '#67c23a'
+    : avgProgress >= 0.8 ? '#85ce61'
+    : avgProgress > 0 ? '#e6a23c'
+    : '#c0c4cc'
+  return L.divIcon({
+    className: 'community-progress-marker',
+    html: `<div style="
+      background:${color};color:#fff;border-radius:50%;
+      width:130px;height:130px;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,0.35);
+      font-family:-apple-system,sans-serif;
+      transition: background 0.4s ease;
+    ">
+      <div style="font-size:30px;font-weight:700;line-height:1;letter-spacing:0.5px">${percent}%</div>
+      <div style="font-size:13px;margin-top:6px;opacity:0.95;font-weight:600">${name}</div>
+      <div style="font-size:11px;margin-top:3px;opacity:0.85">${unitCount} 个单元</div>
+    </div>`,
+    iconSize: [130, 130],
+    iconAnchor: [65, 65],
   })
 }
 
@@ -324,6 +369,118 @@ function renderUnitMarkers() {
   // 这个 layer 暂时保留为空图层（保留给后续"选中单元高亮"等用途）
 }
 
+/** 按 unit.address 前缀分组单元到小区
+ *  例：address = "南海家园七里 · 单元 FSKZ755916" → 归到 "南海家园七里"
+ */
+function groupUnitsByCommunity(): Map<string, CorrosionUnit[]> {
+  const groups = new Map<string, CorrosionUnit[]>()
+  for (const u of store.units) {
+    const prefix = (u.address || '').split('·')[0].trim() || '未分类'
+    if (!groups.has(prefix)) groups.set(prefix, [])
+    groups.get(prefix)!.push(u)
+  }
+  return groups
+}
+
+/** 渲染小区概览图层（zoom < COMMUNITY_VIEW_ZOOM 时显示）
+ *  - 只在每个小区中心放一个大进度圆圈（百分比 + 小区名 + 单元数）
+ *  - 不画控制单元边界多边形，避免缩小后视觉过密
+ */
+function renderCommunityLayers() {
+  if (!map || !communityLayer || !communityMarkerLayer) return
+  communityLayer.clearLayers()
+  communityMarkerLayer.clearLayers()
+
+  const groups = groupUnitsByCommunity()
+  for (const [name, units] of groups) {
+    // 计算小区中心（所有 unit polyline 顶点的平均）
+    const allPts: [number, number][] = []
+    units.forEach((u) => {
+      if (u.polyline && u.polyline.length >= 3) {
+        u.polyline.forEach((pt) => allPts.push(pt))
+      } else if (u.lat && u.lng) {
+        allPts.push([u.lat, u.lng])
+      }
+    })
+
+    if (allPts.length === 0) continue
+
+    const center = avgLatLng(allPts)
+    const avg = avgProgress(units)
+    // 小区内任一单元异常 → 整体显示红色（异常状态优先级最高）
+    const hasException = units.some((u) => u.inspection_status === 'exception')
+
+    // 大进度圆圈（点击 → 地图放大到 18 看单元细节）
+    const marker = L.marker([center.lat, center.lng], {
+      icon: buildCommunityProgressIcon(name, units.length, avg, hasException),
+      interactive: true,
+      zIndexOffset: 500,
+    })
+    marker.on('click', () => {
+      if (map) {
+        map.flyTo([center.lat, center.lng], 18, { duration: 0.8 })
+      }
+      // 通知左侧列表展开对应小区
+      emit('community-focus', name)
+    })
+    marker.addTo(communityMarkerLayer)
+  }
+}
+
+function avgProgress(units: CorrosionUnit[]): number {
+  if (units.length === 0) return 0
+  const sum = units.reduce((s, u) => s + (u.inspection_progress || 0), 0)
+  return sum / units.length
+}
+
+function avgLatLng(pts: [number, number][]) {
+  const lat = pts.reduce((s, p) => s + p[0], 0) / pts.length
+  const lng = pts.reduce((s, p) => s + p[1], 0) / pts.length
+  return { lat, lng }
+}
+
+/** 切换到"小区概览"模式：隐藏细节图层，显示小区图层 */
+function showCommunityView() {
+  isCommunityView = true
+  // 隐藏细节图层（不 clearLayers，只是从地图上移除）
+  unitPolyLayer?.remove()
+  pipeLayer?.remove()
+  jointLayer?.remove()
+  regulatorLayer?.remove()
+  inletLayer?.remove()
+  unitMarkerLayer?.remove()
+  // 显示小区图层
+  communityLayer?.addTo(map!)
+  communityMarkerLayer?.addTo(map!)
+  renderCommunityLayers()
+}
+
+/** 切换到"细节视图"模式：显示细节图层，隐藏小区图层 */
+function showDetailView() {
+  isCommunityView = false
+  // 隐藏小区图层
+  communityLayer?.remove()
+  communityMarkerLayer?.remove()
+  // 显示细节图层（按 onMounted 顺序）
+  unitPolyLayer?.addTo(map!)
+  pipeLayer?.addTo(map!)
+  regulatorLayer?.addTo(map!)
+  inletLayer?.addTo(map!)
+  jointLayer?.addTo(map!)
+  unitMarkerLayer?.addTo(map!)
+}
+
+/** 根据当前 zoom 决定显示模式 */
+function syncViewMode() {
+  if (!map) return
+  const z = map.getZoom()
+  if (z < COMMUNITY_VIEW_ZOOM && !isCommunityView) {
+    showCommunityView()
+  } else if (z >= COMMUNITY_VIEW_ZOOM && isCommunityView) {
+    showDetailView()
+  }
+}
+
 function fitToAll() {
   if (!map) return
   const allLatLngs: [number, number][] = []
@@ -338,7 +495,7 @@ function fitToAll() {
   fac.inlets.forEach((i) => allLatLngs.push([i.lat, i.lng]))
   fac.pipes.forEach((p) => p.coords.forEach(([lng, lat]) => allLatLngs.push([lat, lng])))
   if (allLatLngs.length > 0) {
-    map.fitBounds(allLatLngs, { padding: [60, 60], maxZoom: 17 })
+    map.fitBounds(allLatLngs, { padding: [60, 60], maxZoom: 16 })
   }
 }
 
@@ -387,6 +544,15 @@ onMounted(async () => {
   jointLayer = L.layerGroup().addTo(map)
   unitMarkerLayer = L.layerGroup().addTo(map)
 
+  // 小区概览图层（zoom < COMMUNITY_VIEW_ZOOM 时 addTo，否则保持 remove）
+  communityLayer = L.layerGroup()
+  communityMarkerLayer = L.layerGroup()
+
+  // 监听 zoomend：自动切换细节 / 小区概览模式
+  map.on('zoomend', syncViewMode)
+  // 初始化时根据当前 zoom 决定
+  syncViewMode()
+
   // facilities 还没加载时（首屏），先画已知单元（store.units 此时为 []）
   renderAll()
 })
@@ -408,6 +574,10 @@ watch(
       unitPolyLayer.eachLayer((l: any) => { if (l.options?.icon?.options?.className === 'unit-combo-label') labels.push(l) })
       labels.forEach((l) => unitPolyLayer.removeLayer(l))
       renderUnitPolygons()
+    }
+    // 如果当前是小区概览模式，重新画小区图层（进度更新）
+    if (isCommunityView) {
+      renderCommunityLayers()
     }
   },
 )
