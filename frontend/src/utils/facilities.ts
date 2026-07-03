@@ -72,6 +72,137 @@ const BASE = '/data'
 // 坐标合并精度（约 0.1 m），pipe 端点、joint、inlet 坐标对齐到这一步
 const COORD_PRECISION = 6
 
+/** 加载的小区列表
+ *  - 这里列的小区,public/data/ 下必须有对应的 5 份 CSV(命名格式:<小区名>-{低压|引入口_录入|控制单元|绝缘接头|调压箱}.csv)
+ *  - 以后新增小区:把 CSV 丢进 public/data,然后把这个数组加上一行就行
+ */
+const COMMUNITIES = [
+  '南海家园七里',
+  '南海家园六里',
+] as const
+
+/** 加载并解析一个小区的全部 5 份 CSV
+ *  - 返回该小区的 rawUnits(单元多边形)+ joints/pipes/regulators/inlets(都是点/线)
+ *  - rawUnit 带 community 字段,后面拼 address 用
+ *  - 容错:任何一步 fetch 失败(404 / 解析错)都返回空数据,不阻断其他小区
+ *    (之前用 Promise.all,一个社区失败整个加载崩溃,六里也跟着没数据)
+ */
+async function loadCommunityData(community: string): Promise<{
+  rawUnits: ReturnType<typeof parseCSV> extends never ? never : any[]
+  joints: CsvJoint[]
+  pipes: CsvPipe[]
+  regulators: CsvRegulator[]
+  inlets: CsvInlet[]
+}> {
+  try {
+    const [jointsText, pipesText, regulatorsText, inletsText, unitsText] = await Promise.all([
+      fetch(`${BASE}/${community}-绝缘接头.csv`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      }),
+      fetch(`${BASE}/${community}-低压.csv`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      }),
+      fetch(`${BASE}/${community}-调压箱.csv`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      }),
+      fetch(`${BASE}/${community}-引入口_录入.csv`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      }),
+      fetch(`${BASE}/${community}-控制单元.csv`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.text()
+      }),
+    ])
+
+    // ============ 控制单元 ============
+    const rawUnits = parseCSV(unitsText)
+      .map((r) => {
+        const rings = parseWKTPolygon(r.WKT)
+        if (rings.length === 0) return null
+        const press = (r.Press || '').replace(/[,，]/g, '').trim()
+        if (press && press !== '低压') return null
+        const outerRing = rings[0]
+        const center = polygonCenter(outerRing)
+        return {
+          community,  // 记录这个小区的名字,后面拼 address 用
+          fid: parseInt(r.fid) || 0,
+          name: r.NAME || r.fid,
+          press,
+          type: r.type || '',
+          area: parseFloat(r.SHAPE_Area) || 0,
+          length: parseFloat(r.SHAPE_Leng) || 0,
+          rings,
+          center,
+        }
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x)
+
+    // ============ 解析其他设施 ============
+    const joints: CsvJoint[] = parseCSV(jointsText)
+      .map((r) => {
+        const pt = parseWKTPoint(r.WKT)
+        return pt
+          ? {
+              fid: parseInt(r.fid) || 0,
+              lng: pt[0], lat: pt[1],
+              ecode: r.ECODE || '', type: r.TYPE || '绝缘接头',
+              pressured: r.PRESSURED || '', pipeno: r.PIPENO,
+            }
+          : null
+      })
+      .filter((x): x is CsvJoint => !!x)
+
+    const pipes: CsvPipe[] = parseCSV(pipesText)
+      .map((r) => {
+        const coords = parseWKTLine(r.WKT)
+        return coords
+          ? {
+              fid: parseInt(r.fid) || 0, coords,
+              pipeno: r.PIPENO || '', pressured: r.PRESSURED || '',
+              material: r.MATERIAL || '', diametero: r.DIAMETERO || '',
+              thickness: r.THICKNESS || '', length: r.LENGTH || '',
+            }
+          : null
+      })
+      .filter((x): x is CsvPipe => !!x)
+
+    const regulators: CsvRegulator[] = parseCSV(regulatorsText)
+      .map((r) => {
+        const pt = parseWKTPoint(r.WKT)
+        return pt
+          ? {
+              fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
+              ecode: r.ECODE || '', name: r.NAME || r.ECODE,
+              pressured: r.PRESSURED || '',
+            }
+          : null
+      })
+      .filter((x): x is CsvRegulator => !!x)
+
+    const inlets: CsvInlet[] = parseCSV(inletsText)
+      .map((r) => {
+        const pt = parseWKTPoint(r.WKT)
+        return pt
+          ? {
+              fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
+              ecode: r.ECODE || '', pipeno: r.PIPENO || '',
+              pressured: r.PRESSURED || '',
+            }
+          : null
+      })
+      .filter((x): x is CsvInlet => !!x)
+
+    return { rawUnits, joints, pipes, regulators, inlets }
+  } catch (err) {
+    console.warn(`[Facilities] 跳过小区 ${community}(加载失败):`, err)
+    return { rawUnits: [], joints: [], pipes: [], regulators: [], inlets: [] }
+  }
+}
+
 function coordKey(lng: number, lat: number): string {
   return `${lng.toFixed(COORD_PRECISION)},${lat.toFixed(COORD_PRECISION)}`
 }
@@ -192,43 +323,24 @@ function bfsReachableInlets(
 
 /** 主入口 */
 export async function loadFacilities(): Promise<FacilitiesData> {
-  const [jointsText, pipesText, regulatorsText, inletsText, unitsText] = await Promise.all([
-    fetch(`${BASE}/南海家园七里-绝缘接头.csv`).then((r) => r.text()),
-    fetch(`${BASE}/南海家园七里-低压.csv`).then((r) => r.text()),
-    fetch(`${BASE}/南海家园七里-调压箱.csv`).then((r) => r.text()),
-    fetch(`${BASE}/南海家园七里-引入口_录入.csv`).then((r) => r.text()),
-    fetch(`${BASE}/南海家园七里-控制单元.csv`).then((r) => r.text()),
-  ])
+  // 并行加载所有小区,合并数据
+  const communities = await Promise.all(COMMUNITIES.map(loadCommunityData))
 
-  // ============ 控制单元 ============
-  const rawUnits = parseCSV(unitsText)
-    .map((r) => {
-      const rings = parseWKTPolygon(r.WKT)
-      if (rings.length === 0) return null
-      const press = (r.Press || '').replace(/[,，]/g, '').trim()
-      if (press && press !== '低压') return null
-      const outerRing = rings[0]
-      const center = polygonCenter(outerRing)
-      return {
-        fid: parseInt(r.fid) || 0,
-        name: r.NAME || r.fid,
-        press,
-        type: r.type || '',
-        area: parseFloat(r.SHAPE_Area) || 0,
-        length: parseFloat(r.SHAPE_Leng) || 0,
-        rings,
-        center,
-      }
-    })
-    .filter((x): x is NonNullable<typeof x> => !!x)
+  const rawUnits = communities.flatMap((c) => c.rawUnits)
+  const joints = communities.flatMap((c) => c.joints)
+  const pipes = communities.flatMap((c) => c.pipes)
+  const regulators = communities.flatMap((c) => c.regulators)
+  const inlets = communities.flatMap((c) => c.inlets)
 
+  // ============ 控制单元(全局唯一 ID,跨小区不冲突)============
   const units: CorrosionUnit[] = rawUnits.map((u, idx) => ({
     id: idx + 1,
     pipeline_id: 1,
     name: u.name,
     lng: u.center[0],
     lat: u.center[1],
-    address: `南海家园七里 · 单元 ${u.name}`,
+    // address 动态拼:不再写死"南海家园七里"
+    address: `${u.community} · 单元 ${u.name}`,
     polyline: u.rings[0].map(([lng, lat]) => [lat, lng] as [number, number]),
     inspection_progress: 0,
     inspection_status: 'pending',
@@ -253,61 +365,6 @@ export async function loadFacilities(): Promise<FacilitiesData> {
     }
     return undefined
   }
-
-  // ============ 解析其他设施 ============
-  const joints: CsvJoint[] = parseCSV(jointsText)
-    .map((r) => {
-      const pt = parseWKTPoint(r.WKT)
-      return pt
-        ? {
-            fid: parseInt(r.fid) || 0,
-            lng: pt[0], lat: pt[1],
-            ecode: r.ECODE || '', type: r.TYPE || '绝缘接头',
-            pressured: r.PRESSURED || '', pipeno: r.PIPENO,
-          }
-        : null
-    })
-    .filter((x): x is CsvJoint => !!x)
-
-  const pipes: CsvPipe[] = parseCSV(pipesText)
-    .map((r) => {
-      const coords = parseWKTLine(r.WKT)
-      return coords
-        ? {
-            fid: parseInt(r.fid) || 0, coords,
-            pipeno: r.PIPENO || '', pressured: r.PRESSURED || '',
-            material: r.MATERIAL || '', diametero: r.DIAMETERO || '',
-            thickness: r.THICKNESS || '', length: r.LENGTH || '',
-          }
-        : null
-    })
-    .filter((x): x is CsvPipe => !!x)
-
-  const regulators: CsvRegulator[] = parseCSV(regulatorsText)
-    .map((r) => {
-      const pt = parseWKTPoint(r.WKT)
-      return pt
-        ? {
-            fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
-            ecode: r.ECODE || '', name: r.NAME || r.ECODE,
-            pressured: r.PRESSURED || '',
-          }
-        : null
-    })
-    .filter((x): x is CsvRegulator => !!x)
-
-  const inlets: CsvInlet[] = parseCSV(inletsText)
-    .map((r) => {
-      const pt = parseWKTPoint(r.WKT)
-      return pt
-        ? {
-            fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
-            ecode: r.ECODE || '', pipeno: r.PIPENO || '',
-            pressured: r.PRESSURED || '',
-          }
-        : null
-    })
-    .filter((x): x is CsvInlet => !!x)
 
   // ============ 构建网络图 ============
   const { nodes, adj } = buildNetwork(joints, pipes, inlets, regulators)

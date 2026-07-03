@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useCpStore } from '@/stores/cp'
 import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
@@ -13,26 +13,88 @@ const mapRef = ref<InstanceType<typeof MapView> | null>(null)
 const drawerOpen = ref(false)
 const activeTab = ref('')
 
-/** 小区列表（按地址前缀分组）
- *  - 第一项南海家园七里是真实数据，来自 store.units
- *  - 第二项南海家园六里暂无数据（占位，等后续接入）
- *  - avgProgress：该小区所有单元的平均检测进度
- *  - hasException：小区内是否任一单元异常（用于进度条 status）
+/** 小区清单（固定顺序，与侧边栏菜单一致）
+ *  - 决定 communities 计算的展示顺序与“占位”位置
+ *  - 之后新增小区名：把名字按希望的位置插进这份清单即可
  */
-const communities = computed(() => [
-  {
-    name: '南海家园七里',
-    units: store.units,
-    avgProgress: avgProgress(store.units),
-    hasException: store.units.some((u) => u.inspection_status === 'exception'),
-  },
-  {
-    name: '南海家园六里',
+const COMMUNITY_ORDER = [
+  '南海家园七里',
+  '南海家园六里', '南海家园五里', '南海家园四里', '南海家园三里', '南海家园二里', '南海家园一里',
+  '亦庄金茂悦北区', '亦庄金茂悦南区',
+  '金茂逸墅', '金域东郡',
+  '观海苑', '棠颂璟庐',
+  '鹿海园一里', '鹿海园三里', '鹿海园四里', '鹿海园五里',
+  '泰河园一里', '泰河园一里二区', '泰河园三里', '泰河园四里一区', '泰河园四里二区', '泰河园七里',
+  '悦廷', '亦园', '北京中芯花园', '亦城茗苑',
+]
+
+/** 从 unit.address 解析出小区名
+ *  - facilities.ts 写入的格式是 "南海家园七里 · 单元 X"
+ *  - 用 " · " 分隔符切第一段
+ *  - 解析不出来时归到「未分类」兜底桶
+ */
+function communityOf(unit: CorrosionUnit): string {
+  const addr = unit.address
+  if (!addr) return '未分类'
+  const idx = addr.indexOf(' · ')
+  return idx > 0 ? addr.slice(0, idx) : '未分类'
+}
+
+function emptyCommunity(name: string) {
+  return {
+    name,
     units: [] as CorrosionUnit[],
     avgProgress: 0,
     hasException: false,
-  },
-])
+  }
+}
+
+/** 小区列表（按 address 前缀动态分组）
+ *  - 先把 store.units 按 communityOf 分桶
+ *  - 再按 COMMUNITY_ORDER 顺序拼装：有数据接 units，没数据用 emptyCommunity 占位
+ *  - 出现在 store.units 但不在 COMMUNITY_ORDER 的小区自动追加到末尾（防御性）
+ *  - avgProgress：该小区所有单元的平均检测进度
+ *  - hasException：小区内是否任一单元异常（用于进度条 status）
+ */
+const communities = computed(() => {
+  // 1. 按小区名分桶
+  const buckets = new Map<string, CorrosionUnit[]>()
+  for (const u of store.units) {
+    const c = communityOf(u)
+    let arr = buckets.get(c)
+    if (!arr) {
+      arr = []
+      buckets.set(c, arr)
+    }
+    arr.push(u)
+  }
+
+  // 2. 按 COMMUNITY_ORDER 顺序拼装
+  const known = new Set<string>()
+  const result = COMMUNITY_ORDER.map((name) => {
+    known.add(name)
+    const units = buckets.get(name) ?? []
+    return {
+      name,
+      units,
+      avgProgress: avgProgress(units),
+      hasException: units.some((u) => u.inspection_status === 'exception'),
+    }
+  })
+
+  // 3. 防御性：store.units 里出现的新小区名（尚未加入 COMMUNITY_ORDER），追加到末尾
+  for (const [name, units] of buckets) {
+    if (known.has(name)) continue
+    result.push({
+      name,
+      units,
+      avgProgress: avgProgress(units),
+      hasException: units.some((u) => u.inspection_status === 'exception'),
+    })
+  }
+
+  return result
+})
 
 function avgProgress(units: CorrosionUnit[]) {
   if (units.length === 0) return 0
@@ -55,6 +117,15 @@ function communityProgressColor(percentage: number): string {
 // el-collapse accordion 模式：单值，展开一个会自动收起其他；默认全合上
 const communityActive = ref<string>('')
 
+/** 记录"刚刚聚焦的小区"——两种触发:
+ *  - 合上菜单(communityActive 从有值变空):把刚收起的小区写入
+ *  - 点地图大圆展开菜单(lastMapClick 命中):把刚点开的小区写入
+ *  下方的 watch 会把这个小区滚到 side-panel 顶部,让用户不管怎么操作都能在可视区第一行看到
+ *  - 顺序不动,只动 scrollTop
+ *  - 空字符串表示"暂无聚焦动作"(初始状态)
+ */
+const lastFocusedCommunity = ref<string>('')
+
 function selectUnit(u: CorrosionUnit) {
   store.selectUnit(u)
   // 单击只选中，不开抽屉
@@ -64,17 +135,92 @@ function openDetail(u: CorrosionUnit) {
   store.selectUnit(u)
   drawerOpen.value = true
   activeTab.value = store.items[0]?.code || ''
-  mapRef.value?.flyTo(u)
+  // 不再这里调 flyTo — MapView 里 store.selectedUnit 的 watch 会统一飞到单元,
+  // 避免"openDetail 飞一次 + watch 再飞一次"的双重动画
 }
 
 function onDrawerClosed() {
   store.selectUnit(null)
 }
 
+/** 标记"上次点的大圆名字",watch 里如果新值跟它匹配就跳过
+ *  - 用名字而不是 boolean:避免"重复点同一大圆 → 标志卡在 true → 后续菜单切换不飞"的 bug
+ *  - 每次 onCommunityFocus 都覆盖(重复点同小区时),保证下一次 watch 触发时能正确消费
+ */
+let lastMapClick: string | null = null
+
 /** 点击地图上的小区大圆 → 展开对应小区（accordion 模式直接覆盖） */
 function onCommunityFocus(name: string) {
+  lastMapClick = name
   communityActive.value = name
 }
+
+/** 地图缩放跨过小区/细节阈值时,合上小区菜单
+ *  - 进入小区概览:菜单内容跟地图不匹配(地图是合并大圆,菜单是单个小区的单元),合上避免误导
+ *  - 进入细节视图:不动菜单(用户可能在社区大圆点击时手动展开过某个小区)
+ *  - 只在菜单非空时清空,避免无意义的 ref 变化触发 watch
+ */
+function onViewModeChange(mode: 'community' | 'detail') {
+  if (mode === 'community' && communityActive.value !== '') {
+    communityActive.value = ''
+  }
+}
+
+/** 菜单变化时联动地图 + 滚动列表:
+ *  - lastMapClick 匹配:菜单变化是点大圆触发的,地图已飞过,这里跳过 flyTo
+ *    只清标志 + 滚侧栏
+ *  - 从有到空(合上):zoomToCommunityView() 缩到小区概览级,保持当前中心(不重定位)
+ *    + 记住刚收起的小区 → lastFocusedCommunity,下方 watch 会把它滚到侧栏顶部
+ *  - 从空/旧值到新值(打开/切换):**不再 flyTo** 地图——保持当前视野,只让侧栏滚到对应小区
+ *    想聚焦到某个小区请直接点地图上的大圆(onCommunityFocus 走 lastMapClick 路径)
+ */
+watch(communityActive, (newVal, oldVal) => {
+  if (lastMapClick !== null && newVal === lastMapClick) {
+    // 匹配上"上次点的大圆":地图已飞过,跳过;但要让侧栏也滚到对应小区
+    lastMapClick = null
+    lastFocusedCommunity.value = newVal
+    return
+  }
+  if (!newVal) {
+    if (oldVal) {
+      // 合上菜单 → 记住刚收起的小区,后面 watch 会把它滚到 side-panel 顶部
+      lastFocusedCommunity.value = oldVal
+    }
+    mapRef.value?.zoomToCommunityView()
+    return
+  }
+  if (oldVal !== newVal) {
+    // 菜单展开/切换 → 不再 flyTo 地图,只滚侧栏
+    lastFocusedCommunity.value = newVal
+  }
+})
+
+/** 刚聚焦的小区变化时,把它滚到 side-panel 可视区顶部
+ *  - 触发源两个:合上菜单 / 点地图大圆展开 / 菜单里手动切换小区
+ *  - 用 scrollIntoView(block: 'start'):让元素顶部对齐到滚动容器顶部
+ *  - 不改 COMMUNITY_ORDER,顺序保持原样,只动 scrollTop
+ *  - 必须等 el-collapse accordion 展开 transition 跑完再滚!
+ *    原因:nextTick 时 B 还在折叠态,B 标题 div 的位置 = 折叠态 offsetTop
+ *    transition 跑 ~300ms 期间,A 收起 + B 内容展开,整体列表重排,B 标题 div 位置会变
+ *    此时 scrollIntoView 拿到的位置是错的,展开完后标题就跑到可视区外了
+ *  - scroll 完立刻清回 '':不然后续"同一个小区再次聚焦"会因为值没变,watch 不触发(典型场景:点大圆打开 A → 滚动 → 缩放地图合上 A,A 已经聚焦过,值没变就不滚了)
+ */
+watch(lastFocusedCommunity, (name) => {
+  if (!name) return
+  nextTick(() => {
+    const el = document.querySelector(`[data-community-name="${name}"]`)
+    if (!el) {
+      lastFocusedCommunity.value = ''
+      return
+    }
+    // el-collapse 默认 transition 300ms,350ms 留 buffer
+    setTimeout(() => {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 350)
+  })
+  // 立刻 reset,保证下次再设同一个名字也能触发 watch
+  lastFocusedCommunity.value = ''
+})
 
 const selectedUnit = computed(() => store.selectedUnit)
 
@@ -124,7 +270,7 @@ const tabItems = computed(() =>
       <el-collapse v-model="communityActive" accordion class="community-collapse">
         <el-collapse-item v-for="c in communities" :key="c.name" :name="c.name">
           <template #title>
-            <div class="community-header">
+            <div class="community-header" :data-community-name="c.name">
               <span class="name">{{ c.name }}</span>
               <el-progress
                 v-if="c.units.length > 0"
@@ -154,7 +300,7 @@ const tabItems = computed(() =>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" />
+      <MapView ref="mapRef" :units="store.units" :points="store.points" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
       <div class="map-legend">
         <div><span class="dot" style="background:#67c23a"></span>已完成</div>
         <div><span class="dot" style="background:#e6a23c"></span>进行中</div>
@@ -189,7 +335,7 @@ const tabItems = computed(() =>
           <el-descriptions-item label="状态">
             <StatusTag :status="selectedUnit.inspection_status" />
           </el-descriptions-item>
-          <el-descriptions-item label="中心坐标">{{ selectedUnit.lng }}, {{ selectedUnit.lat }}</el-descriptions-item>
+          <el-descriptions-item label="中心坐标">{{ selectedUnit.lng.toFixed(6) }}, {{ selectedUnit.lat.toFixed(6) }}</el-descriptions-item>
           <el-descriptions-item label="最近检测">{{ selectedUnit.last_inspection_at || '—' }}</el-descriptions-item>
         </el-descriptions>
 

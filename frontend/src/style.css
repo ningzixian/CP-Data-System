@@ -261,6 +261,101 @@ html, body, #app {
   justify-content: center !important;
 }
 
+/* ====== 管线和引入口 hover 动效 ======
+ * - 管线（SVG path）：加粗 + 变蓝
+ * - 引入口（divIcon inner div）：放大 + 变蓝 + 加阴影
+ * - 都用 CSS :hover + transition（不写 JS 事件，浏览器原生 60fps 平滑）
+ */
+
+/* 管线 hover：3px → 6px，绿 → 褐，0.2s 缓动
+ * 注意只覆盖 stroke 属性（不写 color/weight/opacity，因为这些是 Leaflet 写到 SVG attribute 的）
+ * 褐色选 #8B4513（saddlebrown）：跟绿色管道互补，地图底图上对比强
+ *
+ * ⚠️ 必须显式设 stroke / stroke-width / stroke-opacity 的 CSS property:
+ * - 否则这些值来自 Leaflet 的 SVG attribute(path.setAttribute(...))
+ * - CSS transition 监听 CSS property 变化,对 SVG attribute 的变化监听不可靠
+ * - 显式 CSS property 强制走 CSS 路径,transition 才能稳定工作
+ */
+.pipe-line {
+  stroke: #67c23a;
+  stroke-width: 3;
+  stroke-opacity: 0.75;
+  transition: stroke 0.2s ease, stroke-width 0.2s ease, stroke-opacity 0.2s ease;
+}
+.pipe-line:hover,
+.pipe-line.selected {
+  stroke: #8B4513;
+  stroke-width: 6;
+  stroke-opacity: 1;
+}
+
+/* 引入口 hover：14px → 24px（scale 1.7），灰 → 蓝，加阴影，提至顶层
+ * - 双层结构(跟社区大圆一致):
+ *   .leaflet-marker-icon(inlet-marker)  ← Leaflet wrapper,跑定位 translate3d
+ *     .facility-anim                    ← 入场动画层,跑 detailDropIn
+ *       <div>                            ← 实际内容层,跑 hover transition
+ * - 入场动画跑在外层 .facility-anim,hover transition 跑在最内层 div,两个 transform 分属不同元素,
+ *   互不干扰。否则 animation-fill-mode: both 会让 animation 在结束后仍锁住 inner div 的 transform,
+ *   hover 时 scale 被压住 → "突然" 没平滑过渡
+ * - transform-origin 默认 50% 50%，inner div 的圆心正好对齐 latlng（iconAnchor: [7,7]），
+ *   所以围绕圆心放大，位置不偏移
+ */
+.inlet-marker .facility-anim > div {
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+.inlet-marker:hover {
+  z-index: 1000;  /* 提至顶层，避免被相邻 inlet 或 progress marker 盖住 */
+}
+/* hover(鼠标悬停)/hovered(JS 持久化 hover)/selected(click 选中)三种状态共享同一套视觉
+ * - 之前只有 :hover 和 .selected,加了 .hovered 是因为 mouseover JS 触发后 mouse 移走前
+ *   .selected class 还没加,需要 .hovered 占位保持视觉一致
+ * - class z-index:1000 会被 Leaflet 的 inline z-index 赢过,实际无效;真正起作用的是 JS
+ *   moveFacilityToHighlight 把 marker 搬到 facilityHighlightPane(z=750)
+ */
+.inlet-marker:hover .facility-anim > div,
+.inlet-marker.hovered .facility-anim > div,
+.inlet-marker.selected .facility-anim > div {
+  transform: scale(1.7);
+  background: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.6);
+}
+
+/* 绝缘接头 hover/hovered/selected:放大 + 提至顶层（无阴影，颜色保留红色不变）
+ * - 跟引入口一样的视觉一致性,但去掉了 background/box-shadow(接头本来就是红色 ✕)
+ * - 双层结构同上,入场动画跑 .facility-anim,hover transition 跑最内层 div
+ * - class z-index:1000 同上无效,真正起作用的是 facilityHighlightPane
+ */
+.joint-marker .facility-anim > div {
+  transition: transform 0.2s ease;
+  cursor: pointer;
+}
+.joint-marker:hover {
+  z-index: 1000;
+}
+.joint-marker:hover .facility-anim > div,
+.joint-marker.hovered .facility-anim > div,
+.joint-marker.selected .facility-anim > div {
+  transform: scale(1.7);
+}
+
+/* 调压箱 hover/hovered/selected:放大 + 提至顶层,颜色保留蓝色不变
+ * 双层结构同上(跟社区大圆一致),入场动画跑 .facility-anim,hover transition 跑最内层 div
+ * 跟绝缘接头规则几乎一样,只是 className 不同,逻辑独立分开写
+ */
+.regulator-marker .facility-anim > div {
+  transition: transform 0.2s ease;
+  cursor: pointer;
+}
+.regulator-marker:hover {
+  z-index: 1000;
+}
+.regulator-marker:hover .facility-anim > div,
+.regulator-marker.hovered .facility-anim > div,
+.regulator-marker.selected .facility-anim > div {
+  transform: scale(1.7);
+}
+
 .inspection-form { padding: 0 8px; }
 
 .status-tag {
@@ -302,6 +397,82 @@ html, body, #app {
 svg.leaflet-zoom-animated path.leaflet-interactive,
 svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   outline: none !important;
+}
+
+/* 小区概览大圆圈出场动效：
+ *  - scale 0.3 → 1.05 → 1（轻微回弹）
+ *  - opacity 0 → 1
+ *  - 通过 inline style 的 animation-delay 实现错位出场（每个圆间隔 120ms）
+ */
+@keyframes communityPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    /* 不写 transform,让动画结束后 transform 回到"无"状态(base = scale(1))
+     * 这样 :hover 的 transform: scale(...) 才能正常生效,不会被动画 final keyframe 压住
+     * 视觉上等价于 transform: scale(1)(浏览器把无 transform 当作 scale(1) 处理)
+     */
+  }
+}
+
+/* 小区大圆渐隐：纯透明度过渡，慢慢"消融" */
+.community-progress-marker.community-fading {
+  opacity: 0 !important;
+  transition: opacity 0.45s ease !important;
+}
+
+/* 小区大圆 hover 动效：放大 + 加深阴影
+ * 关键架构:外层 .community-anim 跑 communityPopIn 入场动画,内层 .community-hover-target
+ * 跑 hover 缩放。两个 transform 分属不同元素,互不干扰:
+ *   - 外层 transform 被入场动画"锁住"(fill-mode: both 后的 after phase),但它只管入场
+ *   - 内层没有动画,transform 自由受 CSS transition 控制,hover 缩放能正常过渡
+ * 不再用 !important,因为不再和动画竞争
+ */
+.community-progress-marker .community-hover-target {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  transform-origin: center center;
+}
+.community-progress-marker:hover .community-hover-target {
+  transform: scale(1.15);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* 细节视图入场：从上方落下，落地弹一下
+ *  - 动 SVG path（管线 / 多边形）和 marker 内部 div
+ *  - 配合小区大圆渐隐，形成"让位→填充"效果
+ *  - 不动 tile pane，底图始终可见
+ */
+.detail-fading .leaflet-overlay-pane path,
+.detail-fading .leaflet-marker-pane .leaflet-marker-icon > .facility-anim,
+.detail-fading .leaflet-progressDefault-pane .leaflet-marker-icon > * {
+  animation: detailDropIn 0.75s cubic-bezier(0.5, 0, 0.55, 1) both;
+}
+
+@keyframes detailDropIn {
+  /* 0   从屏幕外 280px 上方坠落，透明 */
+  /* 45% 中段淡入可见 */
+  /* 62% 落到位置稍微下沉 4px（落地挤压）*/
+  /* 74% 弹起到 -8px（第一次回弹）*/
+  /* 86% 二次落地（小幅 2px）*/
+  /* 100% 不写 transform — 关键!
+   * 如果 100% 写 transform: translateY(0),fill-mode: both 会让动画结束后 transform 仍然锁在 translateY(0),
+   * 普通 CSS rule(.hovered / .selected)的 transform: scale(1.7) 被锁住,hover 会"突然"没反应
+   * 不写 transform,让动画结束后 transform 回到"无"状态,hover 的 transform 才能正常生效
+   * 视觉上等价于 transform: scale(1),跟社区大圆 hover 同一个套路 */
+  0%   { transform: translateY(-280px); opacity: 0; }
+  45%  { opacity: 1; }
+  62%  { transform: translateY(4px); }
+  74%  { transform: translateY(-8px); }
+  86%  { transform: translateY(2px); }
+  /* 100% 故意不写 transform */
 }
 
 @media (max-width: 768px) {

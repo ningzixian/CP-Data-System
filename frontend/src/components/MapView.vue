@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: 'select', u: CorrosionUnit): void
   (e: 'detail', u: CorrosionUnit): void
   (e: 'community-focus', name: string): void
+  (e: 'view-mode', mode: 'community' | 'detail'): void  // 缩放到小区/细节视图时通知父组件
 }>()
 const store = useCpStore()
 
@@ -34,7 +35,86 @@ let pipeLayer: LayerGroup | null = null       // 低压管道
 let jointLayer: LayerGroup | null = null      // 绝缘接头（红叉）
 let regulatorLayer: LayerGroup | null = null  // 调压箱
 let inletLayer: LayerGroup | null = null      // 引入口
-let unitMarkerLayer: LayerGroup | null = null // 单元业务标记（圆+百分比）
+// 进度圆分两个 layer,两个 pane,分别管"默认状态"和"hover/selected 状态"
+// - progressDefaultLayer   → pane z=350,在 overlayPane(400) 之下,被管线和单元边界覆盖
+// - progressHighlightLayer → pane z=700,在 markerPane(600) 之上,所有 marker 之顶
+// hover/selected 时由 highlightUnit 把 marker 在两个 layer 间切换
+let progressDefaultLayer: LayerGroup | null = null
+let progressHighlightLayer: LayerGroup | null = null
+// 设施(joint/regulator/inlet)高亮层:selected 时把对应 marker 搬到这里,在所有 marker + 进度圆高亮之上
+// - facilityHighlightPane z=750 → 比 progressPaneHighlight(700) 更高,选中设施永远在最顶
+// - 跟进度圆一样,marker.options.pane 不会被 layer group 的 pane 传播,这里只是组织作用
+//   真正搬 marker 用 DOM 操作(moveFacilityToHighlight / moveFacilityToDefault)
+let facilityHighlightLayer: LayerGroup | null = null
+const PROGRESS_PANE_MOVE_DELAY = 280
+const FACILITY_PANE_MOVE_DELAY = 220
+
+// click-to-lock 状态：任一时刻最多选中一个设施(管道/引入口/接头/调压箱)
+// 合并成一个对象,互斥天然成立(选新的会自动 clearSelection 旧的)
+// - kind: 区分设施类型(pipe 用 setStyle,其他用 .selected class)
+// - item: Leaflet 对象引用,重新渲染会丢,需配合 clearLayers 时清空
+let selected: { kind: 'pipe' | 'inlet' | 'joint' | 'regulator', item: any } | null = null
+let hoveredFacility: any | null = null
+
+/** 统一清空当前选中(互斥的核心)
+ *  - pipe 用 setStyle 还原
+ *  - 其他用 remove .selected class + 把 marker 搬回默认 pane
+ *  - 没选中就直接返回
+ */
+function clearSelection() {
+  if (!selected) return
+  if (selected.kind === 'pipe') {
+    selected.item._path?.classList.remove('selected')
+    selected.item.setStyle({ color: '#67c23a', weight: 3, opacity: 0.75 })
+  } else {
+    bumpFacilityVisualToken(selected.item)
+    selected.item.getElement()?.classList.remove('selected')
+    selected.item.getElement()?.classList.remove('hovered')
+    moveFacilityToDefault(selected.item)
+  }
+  selected = null
+}
+
+/** 统一清空"全部"选中(设施 + 控制单元)
+ *  - 设施清空走 clearSelection()
+ *  - 控制单元清空走 store.selectUnit(null)
+ *  - 设施 click / map.on('click) / poly click 都用这个
+ *  - 注意:不在内部调 watch 触发的回调,避免循环
+ */
+function clearAll() {
+  clearSelection()
+  if (store.selectedUnit) store.selectUnit(null)
+}
+
+/** 地图居中到当前选中的设施
+ *  - pipe: 用 flyToBounds 整条管道 fit 进视图
+ *  - 其他(marker): flyTo 单点放大到 zoom 18
+ *  - 没选中 / 没地图就直接返回
+ *  - ⚠️ marker 已经在屏幕中心 ± 50 像素内时,跳过 flyTo 避免 0.6s 动画"晃一下":
+ *    Leaflet flyTo 即使 pan 距离只有几像素,仍会播 0.6s 平移动画,视觉上像地图抖动
+ *  - 屏幕像素距离比地理距离可靠 — zoom 不同 1 像素对应的地理距离差几十倍,
+ *    屏幕像素距离不受 zoom 影响,直接反映"肉眼是否偏离中心"
+ */
+function centerOnSelected() {
+  if (!map || !selected) return
+  // 计算 marker 当前屏幕位置到屏幕中心的像素距离
+  const targetLatLng = selected.kind === 'pipe'
+    ? selected.item.getBounds().getCenter()
+    : selected.item.getLatLng()
+  const targetPoint = map.latLngToContainerPoint(targetLatLng)
+  const size = map.getSize()
+  const centerPoint = { x: size.x / 2, y: size.y / 2 }
+  const dx = targetPoint.x - centerPoint.x
+  const dy = targetPoint.y - centerPoint.y
+  const pixelDistance = Math.sqrt(dx * dx + dy * dy)
+  // 已经在屏幕中心 ± 50 像素内 → 不动(肉眼感觉不到地图在动,flyTo 反而"晃")
+  if (pixelDistance < 50) return
+  if (selected.kind === 'pipe') {
+    map.flyToBounds(selected.item.getBounds(), { maxZoom: 18, duration: 0.6, padding: [60, 60] })
+  } else {
+    map.flyTo(targetLatLng, 18, { duration: 0.6 })
+  }
+}
 
 // 缩放阈值：zoom < COMMUNITY_VIEW_ZOOM 时切换到"小区概览"模式
 // （隐藏管线/引入口/控制单元进度圆圈，显示小区合并多边形 + 大进度圆圈）
@@ -63,10 +143,10 @@ function buildUnitMarkerIcon(status: string, progress: number) {
 function buildJointIcon() {
   return L.divIcon({
     className: 'joint-marker',
-    html: `<div style="
+    html: `<div class="facility-anim"><div style="
       color:#f56c6c;font-size:22px;font-weight:900;line-height:22px;
       text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;
-      font-family:Arial,sans-serif;">✕</div>`,
+      font-family:Arial,sans-serif;">✕</div></div>`,
     iconSize: [22, 22],
     iconAnchor: [11, 11],
   })
@@ -103,11 +183,11 @@ function buildProgressIcon(unit: any, borderColor: string, fillColorOverride?: s
 function buildRegulatorIcon() {
   return L.divIcon({
     className: 'regulator-marker',
-    html: `<div style="
+    html: `<div class="facility-anim"><div style="
       background:#1890ff;color:#fff;border-radius:4px;width:32px;height:32px;
       display:flex;align-items:center;justify-content:center;
       border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);
-      font-weight:700;font-size:14px;">调</div>`,
+      font-weight:700;font-size:14px;">调</div></div>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   })
@@ -116,9 +196,9 @@ function buildRegulatorIcon() {
 function buildInletIcon() {
   return L.divIcon({
     className: 'inlet-marker',
-    html: `<div style="
+    html: `<div class="facility-anim"><div style="
       background:#909399;color:#fff;border-radius:50%;width:14px;height:14px;
-      border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>`,
+      border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div></div>`,
     iconSize: [14, 14],
     iconAnchor: [7, 7],
   })
@@ -132,27 +212,36 @@ function buildInletIcon() {
  *      80-99%                      → 浅绿 #85ce61（即将完成）
  *      1-79%                       → 橙 #e6a23c（进行中）
  *      0%                          → 浅灰 #c0c4cc（未开始）
+ *  - index：用于错位出场（每个圆圈延迟 120ms 出现）
+ *  - 出场动效 communityPopIn 在 style.css 定义（scale + opacity + 轻微回弹）
  */
-function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress: number, hasException = false) {
+function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress: number, hasException = false, index = 0) {
   const percent = Math.round(avgProgress * 100)
   const color = hasException ? '#f56c6c'
     : avgProgress >= 1 ? '#67c23a'
     : avgProgress >= 0.8 ? '#85ce61'
     : avgProgress > 0 ? '#e6a23c'
     : '#c0c4cc'
+  const delay = (index * 0.12).toFixed(2)
   return L.divIcon({
     className: 'community-progress-marker',
-    html: `<div style="
-      background:${color};color:#fff;border-radius:50%;
+    html: `<div class="community-anim" style="
       width:130px;height:130px;
-      display:flex;flex-direction:column;align-items:center;justify-content:center;
-      border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,0.35);
-      font-family:-apple-system,sans-serif;
-      transition: background 0.4s ease;
+      display:flex;align-items:center;justify-content:center;
+      animation: communityPopIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) ${delay}s both;
+      transform-origin: center center;
     ">
-      <div style="font-size:30px;font-weight:700;line-height:1;letter-spacing:0.5px">${percent}%</div>
-      <div style="font-size:13px;margin-top:6px;opacity:0.95;font-weight:600">${name}</div>
-      <div style="font-size:11px;margin-top:3px;opacity:0.85">${unitCount} 个单元</div>
+      <div class="community-hover-target" style="
+        background:${color};color:#fff;border-radius:50%;
+        width:130px;height:130px;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,0.35);
+        font-family:-apple-system,sans-serif;
+      ">
+        <div style="font-size:30px;font-weight:700;line-height:1;letter-spacing:0.5px">${percent}%</div>
+        <div style="font-size:13px;margin-top:6px;opacity:0.95;font-weight:600">${name}</div>
+        <div style="font-size:11px;margin-top:3px;opacity:0.85">${unitCount} 个单元</div>
+      </div>
     </div>`,
     iconSize: [130, 130],
     iconAnchor: [65, 65],
@@ -187,6 +276,44 @@ function applyPolyStyle(poly: any, mode: 'default' | 'hover' | 'selected') {
   })
 }
 
+function moveMarkerToPane(marker: any, targetPane: string) {
+  marker.__paneMoveToken = (marker.__paneMoveToken || 0) + 1
+  if (marker.options.pane === targetPane) return
+  const m = marker._map
+  const iconEl = marker.getElement()
+  if (!m || !iconEl) return
+  const oldPane = iconEl.parentElement
+  const newPane = m.getPane(targetPane)
+  if (oldPane && newPane) {
+    oldPane.removeChild(iconEl)
+    newPane.appendChild(iconEl)
+    marker.options.pane = targetPane
+  }
+}
+
+function moveMarkerToPaneAfter(marker: any, targetPane: string, delay: number) {
+  const token = (marker.__paneMoveToken || 0) + 1
+  marker.__paneMoveToken = token
+  window.setTimeout(() => {
+    if (marker.__paneMoveToken !== token) return
+    moveMarkerToPane(marker, targetPane)
+  }, delay)
+}
+
+function afterNextFrame(fn: () => void) {
+  requestAnimationFrame(() => requestAnimationFrame(fn))
+}
+
+function bumpFacilityVisualToken(marker: any) {
+  marker.__facilityVisualToken = (marker.__facilityVisualToken || 0) + 1
+  return marker.__facilityVisualToken
+}
+
+function bumpUnitMarkerVisualToken(marker: any) {
+  marker.__unitMarkerVisualToken = (marker.__unitMarkerVisualToken || 0) + 1
+  return marker.__unitMarkerVisualToken
+}
+
 /** 统一高亮入口：同时控制多边形样式 + 进度圆圈 border/fill/size
  *  mode: 'default' 还原 / 'hover' 蓝色 / 'selected' 紫色
  *  圆圈（同一 DOM 元素直接改 style，配合 divIcon 里的 CSS transition 平滑过渡）：
@@ -199,6 +326,7 @@ function highlightUnit(unitId: number, mode: 'default' | 'hover' | 'selected') {
   if (poly) applyPolyStyle(poly, mode)
   const mk = unitMarkerMap.get(unitId)
   if (mk) {
+    const token = bumpUnitMarkerVisualToken(mk)
     const u = store.units.find((x) => x.id === unitId)
     if (!u) return
     const el = mk.getElement()?.firstElementChild as HTMLElement | null
@@ -210,20 +338,188 @@ function highlightUnit(unitId: number, mode: 'default' | 'hover' | 'selected') {
       : mode === 'selected' ? '#409eff'
       : (STATUS_COLORS[u.inspection_status] || '#909399')
     const borderColor = mode === 'selected' ? '#fdd835' : '#fff'
-    el.style.width = size + 'px'
-    el.style.height = size + 'px'
-    el.style.fontSize = fontSize + 'px'
-    el.style.background = fill
-    el.style.borderColor = borderColor
-    // 层级：hover/selected 提到最上（zIndex 1000），默认压到最下（zIndex -1000，被管道/引入口覆盖）
-    mk.setZIndexOffset(isEnlarged ? 1000 : -1000)
+    const applyProgressVisual = () => {
+      el.style.width = size + 'px'
+      el.style.height = size + 'px'
+      el.style.fontSize = fontSize + 'px'
+      el.style.background = fill
+      el.style.borderColor = borderColor
+    }
+    // 跨 pane 切换进度圆 icon:
+    // - default       → progressPaneDefault(z=350,被管道覆盖)
+    // - hover/selected → progressPaneHighlight(z=700,在所有 marker 之上)
+    // ⚠️ Leaflet 没有 setPane() API,只能直接操作 DOM:把 icon 元素从旧 pane 搬到新 pane
+    //   marker.options.pane 同步更新,保证后续 Leaflet 内部操作(如 removeIcon)找对 pane
+    const targetPane = mode === 'default' ? 'progressPaneDefault' : 'progressPaneHighlight'
+    if (mode === 'default') {
+      applyProgressVisual()
+      moveMarkerToPaneAfter(mk, targetPane, PROGRESS_PANE_MOVE_DELAY)
+    } else {
+      moveMarkerToPane(mk, targetPane)
+      afterNextFrame(() => {
+        if (mk.__unitMarkerVisualToken !== token) return
+        applyProgressVisual()
+      })
+    }
   }
+}
+
+/** 把设施 marker 搬到 facilityHighlightPane(z=750)
+ *  - 调用场景:joint/regulator/inlet 被点击 → selected
+ *  - Leaflet 没有 setPane() API,只能直接操作 DOM:把 icon 元素从旧 pane 搬到新 pane
+ *  - marker.options.pane 同步更新,保证后续 Leaflet 内部操作(如 removeIcon)找对 pane
+ *  - 同 pane 不重复搬
+ */
+function moveFacilityToHighlight(marker: any) {
+  moveMarkerToPane(marker, 'facilityHighlightPane')
+}
+
+/** 把设施 marker 搬回 markerPane(z=600,Leaflet 默认 marker pane)
+ *  - 调用场景:joint/regulator/inlet 取消选中 / hover 移走
+ *  - 逻辑跟 moveFacilityToHighlight 对称,DOM 操作 + options.pane 同步
+ *  - 同 pane 不重复搬
+ */
+function moveFacilityToDefault(marker: any) {
+  moveMarkerToPaneAfter(marker, 'markerPane', FACILITY_PANE_MOVE_DELAY)
+}
+
+function activateFacilityMarker(marker: any, className: 'hovered' | 'selected') {
+  const el = marker.getElement()
+  const token = bumpFacilityVisualToken(marker)
+  moveFacilityToHighlight(marker)
+  afterNextFrame(() => {
+    if (marker.__facilityVisualToken !== token) return
+    el?.classList.add(className)
+  })
+}
+
+function deactivateFacilityHover(marker: any) {
+  const el = marker.getElement()
+  el?.classList.remove('hovered')
+  if (selected?.item === marker) return
+  bumpFacilityVisualToken(marker)
+  moveFacilityToDefault(marker)
+}
+
+/** 设施(joint/regulator/inlet)交互统一处理:click 选中 + hover 高亮
+ *  - click        → 持久 .selected,搬到 facilityHighlightPane(z=750)
+ *  - mouseover    → 临时 .hovered,搬到 facilityHighlightPane(如果未 selected)
+ *  - mouseout     → 移除 .hovered,搬回 markerPane(如果未 selected)
+ *  - 重复点同 marker → 取消 .selected + .hovered,搬回 markerPane
+ *  - 互斥:clearAll() 清掉旧的设施 + 控制单元选中
+ *
+ *  跟 selected 同样待遇(都搬 facilityHighlightPane),保证 hover/selected 的 marker
+ *  永远在 markerPane(z=600)内的其他普通 marker 之顶
+ *
+ *  ⚠️ 三种状态共享同一套 CSS 视觉(.hovered / .selected / :hover 都触发 transform: scale(1.7))
+ *  - :hover 是浏览器原生 pseudo-class,鼠标在 marker 上就生效
+ *  - .hovered 是 JS 持久化的 hover 状态,mouseover 加,mouseout 移
+ *  - .selected 是 click-to-lock 状态,点击后持续生效不依赖鼠标
+ *  - 三者视觉效果一致,只是生命周期不同
+ */
+function setupFacilityInteraction(marker: any, kind: 'joint' | 'regulator' | 'inlet') {
+  // ============ click:持久选中 ============
+  marker.on('click', (e: any) => {
+    L.DomEvent.stopPropagation(e)  // 阻止冒泡到 map(避免触发 clearAll)
+    const el = marker.getElement() as HTMLElement | null
+    // 重复点同一 marker → 取消选中
+    if (selected?.kind === kind && selected.item === marker) {
+      bumpFacilityVisualToken(marker)
+      el?.classList.remove('selected')
+      el?.classList.remove('hovered')
+      moveFacilityToDefault(marker)
+      selected = null
+      if (hoveredFacility === marker) hoveredFacility = null
+      return
+    }
+    // 点新 marker → 清空旧的 + 选中
+    clearAll()
+    activateFacilityMarker(marker, 'selected')
+    selected = { kind, item: marker }
+    centerOnSelected()  // 居中并放大
+  })
+
+  // ============ mouseover:临时高亮 ============
+  marker.on('mouseover', () => {
+    // 已 selected → 已经在 facilityHighlightPane,跳过(不重复搬)
+    if (selected?.item === marker) return
+    if (hoveredFacility && hoveredFacility !== marker) {
+      deactivateFacilityHover(hoveredFacility)
+    }
+    hoveredFacility = marker
+    activateFacilityMarker(marker, 'hovered')
+  })
+
+  // ============ mouseout:还原 ============
+  marker.on('mouseout', () => {
+    if (hoveredFacility === marker) hoveredFacility = null
+    deactivateFacilityHover(marker)
+  })
+}
+
+/** 管线交互:click 选中 + hover 高亮(移到 SVG 末尾保证最上)
+ *  - 用 SVG 文档顺序代替 z-index:把 path 移到 _rootGroup 末尾 → SVG 绘制顺序最后 → 视觉最上
+ *    (SVG 同容器内,文档顺序决定 z 序,后画的盖前画的;CSS z-index 在 SVG 上需要 position != static,
+ *     Leaflet 没给 path 设 position,所以最稳的做法就是 appendChild 到末尾)
+ *  - mouseout 不移回原位置,反正下次 hover 又会 appendChild 到末尾,顺序累积但视觉无问题
+ *    (目标只是"hover/selected 的 path 总在最上",具体顺序不重要)
+ *  - 视觉:hover 样式由 CSS .pipe-line:hover 负责(褐色 + 6 + 1),JS 只负责 z 序
+ *  - 互斥:clearAll() 清掉旧的设施 + 控制单元选中
+ */
+function setupPipeInteraction(line: any) {
+  /** 把 path 移到 SVG _rootGroup 末尾 — SVG 文档顺序最后 = 视觉最上 */
+  function bringToFront() {
+    const path = line._path
+    const rootGroup = line._renderer?._rootGroup
+    // lastChild 已经是 path 就跳过,避免无谓 DOM 操作
+    if (path && rootGroup && rootGroup.lastChild !== path) {
+      rootGroup.appendChild(path)
+    }
+  }
+
+  // ============ click:持久选中 ============
+  line.on('click', (e: any) => {
+    L.DomEvent.stopPropagation(e)  // 阻止冒泡到 map
+    // 重复点同一 line → 取消选中
+    if (selected?.kind === 'pipe' && selected.item === line) {
+      line._path?.classList.remove('selected')
+      line.setStyle({ color: '#67c23a', weight: 3, opacity: 0.75 })
+      selected = null
+      return
+    }
+    // 点新 line → 清空旧的 + 选中
+    clearAll()
+    bringToFront()
+    line._path?.classList.add('selected')
+    line.setStyle({ color: '#8B4513', weight: 6, opacity: 1 })
+    selected = { kind: 'pipe', item: line }
+    centerOnSelected()  // 居中并放大
+  })
+
+  // ============ mouseover:临时高亮(只移 z 序,样式由 CSS :hover 负责) ============
+  line.on('mouseover', () => {
+    // 已 selected → 已经在 SVG 末尾(click 时已搬),跳过
+    if (selected?.item === line) return
+    bringToFront()
+  })
+
+  // ============ mouseout:不动 z 序,只 setStyle 兜底还原 ============
+  line.on('mouseout', () => {
+    // 已 selected → 保留样式 + 末尾位置
+    if (selected?.item === line) return
+    // setStyle 还原默认(CSS :hover 撤销已经够,但显式 setStyle 更稳,防止边界情况)
+    line.setStyle({ color: '#67c23a', weight: 3, opacity: 0.75 })
+  })
 }
 
 // ============== 渲染 ==============
 function renderUnitPolygons() {
-  if (!map || !unitPolyLayer) return
+  if (!map || !unitPolyLayer || !progressDefaultLayer) return
+  unitMarkerMap.forEach((marker) => bumpUnitMarkerVisualToken(marker))
+  if (store.hoveredUnit) store.hoverUnit(null)
   unitPolyLayer.clearLayers()
+  progressDefaultLayer.clearLayers()
+  progressHighlightLayer?.clearLayers()  // 清掉任何留在 highlight pane 的旧 marker
   unitPolyMap.clear()  // 清空引用缓存
   unitMarkerMap.clear()
   const fac = store.facilities
@@ -257,14 +553,17 @@ function renderUnitPolygons() {
     })
 
     // click → 选中（阻止冒泡到 map，避免触发取消选中）
+    // 互斥：先清掉设施选中,再选这个 poly
     poly.on('click', (e: any) => {
       L.DomEvent.stopPropagation(e)
+      clearSelection()
       const unit = store.units.find((x) => x.id === u.id)
       if (unit) { store.selectUnit(unit); emit('select', unit) }
     })
     // dblclick → 打开详情（同时也会触发 click，但顺序是 click 先，dblclick 后）
     poly.on('dblclick', (e: any) => {
       L.DomEvent.stopPropagation(e)  // 阻止地图 dblclick 缩放
+      clearSelection()
       const unit = store.units.find((x) => x.id === u.id)
       if (unit) { store.selectUnit(unit); emit('detail', unit) }
     })
@@ -282,10 +581,17 @@ function renderUnitPolygons() {
     const size = isSelected ? 62 : 50
     const fontSize = isSelected ? 18 : 14
     const labelIcon = buildProgressIcon(liveUnit, borderColor, fillOverride, size, fontSize)
-    if (u.lat && u.lng) {
-      // 初始 zIndex = -1000（最下，被管道/引入口覆盖）；hover/selected 时通过 highlightUnit 提到最上
-      const label = L.marker([u.lat, u.lng], { icon: labelIcon, interactive: false, zIndexOffset: -1000 })
-      label.addTo(unitPolyLayer!)
+if (u.lat && u.lng) {
+      // 进度圆 marker 必须显式设 pane:'progressPaneDefault'(z=350,被管线和多边形覆盖)
+      // - ⚠️ Leaflet L.LayerGroup 的 pane 选项不会传播给子 marker,marker 只认自己的 options.pane
+      // - 这里 addTo(progressDefaultLayer) 只是为了组织/跟踪,真正的视觉 pane 由 options.pane 决定
+      // - hover/selected 时由 highlightUnit 用 DOM 操作把 icon 搬到 progressPaneHighlight(z=700)
+      const label = L.marker([u.lat, u.lng], {
+        icon: labelIcon,
+        interactive: false,
+        pane: 'progressPaneDefault',
+      })
+      label.addTo(progressDefaultLayer!)
       unitMarkerMap.set(u.id, label)
     }
   })
@@ -299,6 +605,7 @@ function renderPipes() {
     if (p.coords.length < 2) return
     const line = L.polyline(p.coords.map(([lng, lat]) => [lat, lng]), {
       color: '#67c23a', weight: 3, opacity: 0.75, lineCap: 'round', lineJoin: 'round',
+      className: 'pipe-line',  // 用于 CSS :hover 放大(见 style.css .pipe-line:hover)
     })
     line.bindTooltip(
       `<b>${p.pipeno || p.fid}</b><br/>` +
@@ -307,6 +614,8 @@ function renderPipes() {
       `压力：${p.pressured}`,
       { sticky: true },
     )
+    // 统一交互:click 选中 + hover 高亮(移到 SVG 末尾保证最上)
+    setupPipeInteraction(line)
     line.addTo(pipeLayer!)
   })
 }
@@ -314,6 +623,9 @@ function renderPipes() {
 function renderJoints() {
   if (!map || !jointLayer) return
   jointLayer.clearLayers()
+  // 清掉任何留在 facilityHighlightPane 的旧 marker icon
+  // (搬过去的 marker 已被 clearLayers 失去 layer 引用,但 DOM 还可能在 pane 里残留)
+  map.getPane('facilityHighlightPane')!.innerHTML = ''
   const joints = store.facilities?.joints ?? []
   joints.forEach((j) => {
     const marker = L.marker([j.lat, j.lng], { icon: buildJointIcon() })
@@ -326,6 +638,8 @@ function renderJoints() {
       (belongsTo ? `<br/>归属：${belongsTo}` : '<br/><span style="color:#f56c6c">⚠ 未归属</span>'),
       { direction: 'top', offset: [0, -8] },
     )
+    // 统一交互:click 选中 + hover 高亮(都搬到 facilityHighlightPane z=750)
+    setupFacilityInteraction(marker, 'joint')
     marker.addTo(jointLayer!)
   })
 }
@@ -333,6 +647,8 @@ function renderJoints() {
 function renderRegulators() {
   if (!map || !regulatorLayer) return
   regulatorLayer.clearLayers()
+  // 清掉任何留在 facilityHighlightPane 的旧 marker icon
+  map.getPane('facilityHighlightPane')!.innerHTML = ''
   const regulators = store.facilities?.regulators ?? []
   regulators.forEach((r) => {
     const marker = L.marker([r.lat, r.lng], { icon: buildRegulatorIcon() })
@@ -340,6 +656,8 @@ function renderRegulators() {
       `<b>调压箱 ${r.name}</b><br/>编码：${r.ecode}<br/>压力：${r.pressured}`,
       { direction: 'top', offset: [0, -10] },
     )
+    // 统一交互:click 选中 + hover 高亮(都搬到 facilityHighlightPane z=750)
+    setupFacilityInteraction(marker, 'regulator')
     marker.addTo(regulatorLayer!)
   })
 }
@@ -347,6 +665,8 @@ function renderRegulators() {
 function renderInlets() {
   if (!map || !inletLayer) return
   inletLayer.clearLayers()
+  // 清掉任何留在 facilityHighlightPane 的旧 marker icon
+  map.getPane('facilityHighlightPane')!.innerHTML = ''
   const inlets = store.facilities?.inlets ?? []
   inlets.forEach((i) => {
     const marker = L.marker([i.lat, i.lng], { icon: buildInletIcon() })
@@ -358,15 +678,10 @@ function renderInlets() {
       (belongsTo ? `<br/>归属：${belongsTo}` : ''),
       { direction: 'top', offset: [0, -6] },
     )
+    // 统一交互:click 选中 + hover 高亮(都搬到 facilityHighlightPane z=750)
+    setupFacilityInteraction(marker, 'inlet')
     marker.addTo(inletLayer!)
   })
-}
-
-function renderUnitMarkers() {
-  if (!map || !unitMarkerLayer) return
-  unitMarkerLayer.clearLayers()
-  // 不再画独立大圆圈 — 进度圆圈已经在 unitPolyLayer 的组合标签里
-  // 这个 layer 暂时保留为空图层（保留给后续"选中单元高亮"等用途）
 }
 
 /** 按 unit.address 前缀分组单元到小区
@@ -392,6 +707,7 @@ function renderCommunityLayers() {
   communityMarkerLayer.clearLayers()
 
   const groups = groupUnitsByCommunity()
+  let index = 0
   for (const [name, units] of groups) {
     // 计算小区中心（所有 unit polyline 顶点的平均）
     const allPts: [number, number][] = []
@@ -412,7 +728,7 @@ function renderCommunityLayers() {
 
     // 大进度圆圈（点击 → 地图放大到 18 看单元细节）
     const marker = L.marker([center.lat, center.lng], {
-      icon: buildCommunityProgressIcon(name, units.length, avg, hasException),
+      icon: buildCommunityProgressIcon(name, units.length, avg, hasException, index),
       interactive: true,
       zIndexOffset: 500,
     })
@@ -424,6 +740,7 @@ function renderCommunityLayers() {
       emit('community-focus', name)
     })
     marker.addTo(communityMarkerLayer)
+    index++
   }
 }
 
@@ -448,26 +765,62 @@ function showCommunityView() {
   jointLayer?.remove()
   regulatorLayer?.remove()
   inletLayer?.remove()
-  unitMarkerLayer?.remove()
+  progressDefaultLayer?.remove()
+  progressHighlightLayer?.remove()
+  facilityHighlightLayer?.remove()
   // 显示小区图层
   communityLayer?.addTo(map!)
   communityMarkerLayer?.addTo(map!)
   renderCommunityLayers()
 }
 
-/** 切换到"细节视图"模式：显示细节图层，隐藏小区图层 */
+/** 切换到"细节视图"模式：显示细节图层，隐藏小区图层
+ *  - 0ms 起：小区大圆渐隐（0.45s 过渡）+ 细节图层加进来 + 设施错峰下落
+ *  - 关键：不要立即 remove 小区图层，DOM 必须在过渡跑完后才能移除
+ *  - 错峰：每个设施随机 animation-delay 0~400ms，落地时间错开
+ *  - 总时长：0.75s 落地 + 0.4s 错峰 + 50ms buffer = 1.2s 后移除 .detail-fading
+ */
 function showDetailView() {
   isCommunityView = false
-  // 隐藏小区图层
-  communityLayer?.remove()
-  communityMarkerLayer?.remove()
-  // 显示细节图层（按 onMounted 顺序）
+
+  // 1) 渐隐小区大圆（加 class，不立即 remove，让 CSS 过渡跑完）
+  if (communityMarkerLayer) {
+    communityMarkerLayer.eachLayer((mk: any) => {
+      const el = mk.getElement() as HTMLElement | null
+      if (el) el.classList.add('community-fading')
+    })
+  }
+
+  // 2) 立即加细节图层（DOM 同步进 pane）
   unitPolyLayer?.addTo(map!)
   pipeLayer?.addTo(map!)
   regulatorLayer?.addTo(map!)
   inletLayer?.addTo(map!)
   jointLayer?.addTo(map!)
-  unitMarkerLayer?.addTo(map!)
+  progressDefaultLayer?.addTo(map!)
+  progressHighlightLayer?.addTo(map!)
+  facilityHighlightLayer?.addTo(map!)
+
+  // 3) 给每个 detail 元素加随机 animation-delay(0~400ms 错峰)
+  // 包含三个 pane:overlay(管线/边界)、marker(调压箱等)、progressDefault(进度圆默认态)
+  if (mapRef.value) {
+    const els = mapRef.value.querySelectorAll<HTMLElement>(
+      '.leaflet-overlay-pane path, .leaflet-marker-pane .leaflet-marker-icon > .facility-anim, .leaflet-progressDefault-pane .leaflet-marker-icon > *',
+    )
+    els.forEach((el) => {
+      el.style.animationDelay = `${(Math.random() * 0.4).toFixed(3)}s`
+    })
+    // 4) 触发下落入场
+    mapRef.value.classList.add('detail-fading')
+    // 5) 动画结束后移除 .detail-fading(0.75s 落地 + 0.4s 错峰 + 50ms buffer = 1.2s)
+    setTimeout(() => mapRef.value?.classList.remove('detail-fading'), 1200)
+  }
+
+  // 6) 大圆渐隐完（0.45s + 30ms buffer）后再移除 DOM（这是之前漏掉的关键步骤）
+  setTimeout(() => {
+    communityLayer?.remove()
+    communityMarkerLayer?.remove()
+  }, 480)
 }
 
 /** 根据当前 zoom 决定显示模式 */
@@ -476,8 +829,10 @@ function syncViewMode() {
   const z = map.getZoom()
   if (z < COMMUNITY_VIEW_ZOOM && !isCommunityView) {
     showCommunityView()
+    emit('view-mode', 'community')  // 进入小区概览,通知父组件收起菜单
   } else if (z >= COMMUNITY_VIEW_ZOOM && isCommunityView) {
     showDetailView()
+    emit('view-mode', 'detail')    // 进入细节视图
   }
 }
 
@@ -499,13 +854,46 @@ function fitToAll() {
   }
 }
 
+/** 缩小到小区概览缩放级(zoom 16),但保持当前中心,不平移
+ *  - 菜单合上时调用:用户想看回更广的区域,但不想地图乱跑
+ *  - 只在当前 zoom > 16 时生效(已经够广就不动),避免误触发缩进
+ *  - 目标 zoom 16 = 初始视图级,刚好显示小区大圆
+ */
+function zoomToCommunityView() {
+  if (!map) return
+  if (map.getZoom() <= 16) return  // 已经够广,不动
+  const c = map.getCenter()
+  map.flyTo([c.lat, c.lng], 16, { duration: 0.6 })
+}
+
+/** 飞到指定小区中心(zoom 18,等同点击地图上的进度圆效果)
+ *  - 复用 fitToCommunities 里的"小区中心"算法,跟 renderCommunityLayers 完全一致
+ *  - 菜单点开小区时调用,实现"点菜单 = 点大圆"
+ */
+function flyToCommunity(name: string) {
+  if (!map) return
+  const groups = groupUnitsByCommunity()
+  const units = groups.get(name)
+  if (!units || units.length === 0) return
+  const pts: [number, number][] = []
+  units.forEach((u) => {
+    if (u.polyline && u.polyline.length >= 3) {
+      u.polyline.forEach((pt) => pts.push(pt))
+    } else if (u.lat && u.lng) {
+      pts.push([u.lat, u.lng])
+    }
+  })
+  if (pts.length === 0) return
+  const c = avgLatLng(pts)
+  map.flyTo([c.lat, c.lng], 18, { duration: 0.8 })
+}
+
 function renderAll() {
   renderUnitPolygons()
   renderPipes()
   renderJoints()
   renderRegulators()
   renderInlets()
-  renderUnitMarkers()
   fitToAll()
 }
 
@@ -523,7 +911,7 @@ function flyTo(unit: CorrosionUnit | null) {
   map.flyToBounds(bounds, { maxZoom: 18, duration: 0.8, padding: [60, 60] })
 }
 
-defineExpose({ flyTo, invalidate: () => map?.invalidateSize() })
+defineExpose({ flyTo, zoomToCommunityView, flyToCommunity, invalidate: () => map?.invalidateSize() })
 
 onMounted(async () => {
   if (!mapRef.value) return
@@ -531,18 +919,39 @@ onMounted(async () => {
     .setView([39.757, 116.494], 16)
   L.tileLayer(AMAP_URL, { subdomains: '1234', maxZoom: 18 }).addTo(map)
 
-  // 点击地图空白处（不是 poly）→ 取消选中
+  // canvas renderer 撤回:canvas 不读 path 的 className,CSS :hover 和 transform 入场动画都失效
+  // 所有 path 用默认 SVG renderer(CSS .pipe-line:hover / .detail-fading .path 动画都生效)
+
+  // 自定义三 pane 管 z 序分层
+  // - 默认 Leaflet pane: tilePane(200) → overlayPane(400) → shadowPane(500) → markerPane(600)
+  //   → tooltipPane(650) → popupPane(700)
+  // - progressPaneDefault   z=350 → 夹在 tilePane 和 overlayPane 之间,管线和多边形都在它上面
+  // - progressPaneHighlight z=700 → 在 markerPane 之上,所有 marker 之顶(包括调压箱/引入口/接头)
+  // - facilityHighlightPane z=750 → 选中设施永远在最顶(比进度圆高亮还高,概念上"被选中的 > 高亮的")
+  map.createPane('progressPaneDefault')
+  map.getPane('progressPaneDefault')!.style.zIndex = '350'
+  map.createPane('progressPaneHighlight')
+  map.getPane('progressPaneHighlight')!.style.zIndex = '700'
+  map.createPane('facilityHighlightPane')
+  map.getPane('facilityHighlightPane')!.style.zIndex = '750'
+
+  // 点击地图空白处（不是 poly/facility）→ 取消所有选中
+  // clearAll() 内部按 selected.kind 分发,不用每个类型各写一遍
   map.on('click', () => {
-    if (store.selectedUnit) store.selectUnit(null)
+    clearAll()
   })
 
-  // 图层顺序：底图 → 多边形 → 管道 → 调压箱 → 引入口 → 接头 → 业务标记
+  // 图层顺序：底图 → 进度圆(默认) → 多边形 → 管道 → 调压箱 → 引入口 → 接头 → 进度圆(高亮) → 设施高亮(留空备用)
   unitPolyLayer = L.layerGroup().addTo(map)
   pipeLayer = L.layerGroup().addTo(map)
   regulatorLayer = L.layerGroup().addTo(map)
   inletLayer = L.layerGroup().addTo(map)
   jointLayer = L.layerGroup().addTo(map)
-  unitMarkerLayer = L.layerGroup().addTo(map)
+  // 进度圆两个 layer 分别绑定上面创建的两个 pane
+  progressDefaultLayer = L.layerGroup({ pane: 'progressPaneDefault' }).addTo(map)
+  progressHighlightLayer = L.layerGroup({ pane: 'progressPaneHighlight' }).addTo(map)
+  // 设施高亮 layer(初始空,marker 选中时通过 DOM 操作直接搬到 pane,不进 layer)
+  facilityHighlightLayer = L.layerGroup({ pane: 'facilityHighlightPane' }).addTo(map)
 
   // 小区概览图层（zoom < COMMUNITY_VIEW_ZOOM 时 addTo，否则保持 remove）
   communityLayer = L.layerGroup()
@@ -583,10 +992,13 @@ watch(
 )
 
 // 监听 store.selectedUnit 变化（侧边栏或别处切换选中单元时，多边形边框高亮 + 圆圈 border 变橙）
+// 同时承担互斥职责：单元被选中时(从 UnitCard 或其他入口),自动清掉设施选中
 watch(
   () => store.selectedUnit?.id,
   (newId, oldId) => {
     if (!unitPolyLayer) return
+    // 互斥：单元被选中 → 清设施（仅 newId 有值时,清空时不重复触发）
+    if (newId !== undefined) clearSelection()
     // 还原旧的：如果当前有 hover 它就保留 hover，否则还原默认
     if (oldId !== undefined) {
       if (store.hoveredUnit?.id === oldId) highlightUnit(oldId, 'hover')
@@ -614,6 +1026,8 @@ watch(
 )
 
 // 监听 store.selectedUnit 变化（单击 UnitCard / poly → 单元居中并放大到最大）
+// ⚠️ poly 边界中心已经在屏幕中心 ± 50 像素内时,跳过 flyToBounds,避免 0.6s 动画"晃一下"
+// (用屏幕像素距离判断,不受 zoom 影响,zoom 18 也能正常 fit 进视图)
 watch(
   () => store.selectedUnit,
   (u) => {
@@ -622,8 +1036,19 @@ watch(
       ? u.polyline
       : (u.lat && u.lng ? [[u.lat, u.lng] as [number, number]] : [])
     if (pts.length === 0) return
+    // 计算 poly 中心当前屏幕位置到屏幕中心的像素距离
+    const targetBounds = L.latLngBounds(pts)
+    const targetCenter = targetBounds.getCenter()
+    const targetPoint = map.latLngToContainerPoint(targetCenter)
+    const size = map.getSize()
+    const centerPoint = { x: size.x / 2, y: size.y / 2 }
+    const dx = targetPoint.x - centerPoint.x
+    const dy = targetPoint.y - centerPoint.y
+    const pixelDistance = Math.sqrt(dx * dx + dy * dy)
+    // 已经在屏幕中心 ± 50 像素内 → 不动(肉眼感觉不到地图在动,flyToBounds 反而"晃")
+    if (pixelDistance < 50) return
     map.invalidateSize()
-    map.flyToBounds(L.latLngBounds(pts), { maxZoom: 18, duration: 0.6, padding: [60, 60] })
+    map.flyToBounds(targetBounds, { maxZoom: 18, duration: 0.6, padding: [60, 60] })
   },
 )
 
