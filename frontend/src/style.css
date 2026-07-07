@@ -450,10 +450,16 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
  *  - 配合小区大圆渐隐，形成"让位→填充"效果
  *  - 不动 tile pane，底图始终可见
  */
-.detail-fading .leaflet-overlay-pane path,
+/* 详情视图入场：从 0.75s 加快到 0.45s（管线/多边形/引入口/调压箱/接头/进度圆全部一起快） */
 .detail-fading .leaflet-marker-pane .leaflet-marker-icon > .facility-anim,
 .detail-fading .leaflet-progressDefault-pane .leaflet-marker-icon > * {
-  animation: detailDropIn 0.75s cubic-bezier(0.5, 0, 0.55, 1) both;
+  animation: detailDropIn 0.5s cubic-bezier(0.5, 0, 0.55, 1) both;
+  will-change: transform, opacity;
+}
+
+.detail-fading .leaflet-overlay-pane path {
+  animation: detailFadeIn 0.28s ease both;
+  will-change: opacity;
 }
 
 @keyframes detailDropIn {
@@ -473,6 +479,260 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   74%  { transform: translateY(-8px); }
   86%  { transform: translateY(2px); }
   /* 100% 故意不写 transform */
+}
+
+@keyframes detailFadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* ====== 右侧单元信息卡片（单击控制单元浮出，给领导看）======
+ * - 横窄竖长：宽 280px，上 76px / 下 20px / 右 20px 留空
+ * - 入场：translateX 从屏幕外滑入，0.4s 弹性曲线
+ * - 与双击抽屉并存：单击 → 本卡片（快速浏览），双击 → 抽屉（完整录入）
+ */
+.unit-info-card {
+  position: fixed;
+  top: 76px;
+  right: 20px;
+  bottom: 20px;
+  width: 280px;
+  z-index: 999;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(31, 58, 95, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+/* Vue Transition 控制进场/离场（不再用 .open class）
+ * - enter：弹性曲线 0.3s,首次打开有"入场感"
+ * - leave：快收 0.15s,切换单元时快速腾位置(配合 mode="out-in" + :key="unit.id")
+ * - 总切换时长 ≈ 0.45s,比单次 enter 的 0.4s 还紧凑,符合"快一点"诉求
+ * - 关键:默认 .unit-info-card 没有 transform/opacity,起点完全由 enter-from 控制
+ */
+.slide-right-enter-active {
+  transition:
+    transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1),
+    opacity 0.25s ease;
+}
+.slide-right-leave-active {
+  transition:
+    transform 0.15s ease-in,
+    opacity 0.15s ease-in;
+}
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(calc(100% + 40px));
+  opacity: 0;
+}
+
+/* 顶部：单元名 + 地址 */
+.unit-info-card .info-header {
+  padding: 20px 20px 14px;
+  border-bottom: 1px solid #f0f2f5;
+}
+.unit-info-card .info-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f3a5f;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+}
+.unit-info-card .info-address {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.unit-info-card .info-address-icon {
+  flex-shrink: 0;
+  color: #c0c4cc;
+}
+
+/* 进度环 + 状态 */
+.unit-info-card .info-progress {
+  padding: 24px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.unit-info-card .info-ring {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-color, #409eff) var(--pct, 0%),
+    #ebeef5 var(--pct, 0%)
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.unit-info-card .info-ring::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  background: #fff;
+  border-radius: 50%;
+}
+.unit-info-card .info-ring-num {
+  position: relative;
+  z-index: 1;
+  font-size: 28px;
+  font-weight: 700;
+  color: #303133;
+  letter-spacing: -0.5px;
+}
+.unit-info-card .info-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: #f5f7fa;
+}
+.unit-info-card .info-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.unit-info-card .info-status-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.unit-info-card .info-progress-text {
+  text-align: center;
+  font-size: 13px;
+  color: #606266;
+  padding: 0 20px;
+}
+.unit-info-card .info-progress-text strong {
+  font-size: 16px;
+  color: #1f3a5f;
+  font-weight: 700;
+  margin: 0 2px;
+}
+
+.unit-info-card .info-divider {
+  margin: 16px 20px;
+  height: 1px;
+  background: #f0f2f5;
+}
+
+/* 基础属性区（2×3 网格）：单元面积/管道长度/引入口/绝缘接头/起止里程 */
+.unit-info-card .info-section-title {
+  font-size: 12px;
+  color: #909399;
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  padding: 0 20px;
+}
+.unit-info-card .info-attrs {
+  padding: 0 20px;
+}
+.unit-info-card .info-attrs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.unit-info-card .info-attr-cell {
+  background: #fafbfc;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.unit-info-card .info-attr-cell:hover {
+  border-color: #409eff;
+  background: #f0f8ff;
+}
+.unit-info-card .info-attr-label {
+  font-size: 11px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.unit-info-card .info-attr-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f3a5f;
+  letter-spacing: 0.3px;
+}
+.unit-info-card .info-attr-value small {
+  font-size: 11px;
+  color: #909399;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+/* 关键数据 */
+.unit-info-card .info-stats {
+  padding: 0 20px 16px;
+}
+.unit-info-card .info-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed #f0f2f5;
+}
+.unit-info-card .info-stat-row:last-child {
+  border-bottom: none;
+}
+.unit-info-card .info-stat-label {
+  color: #909399;
+}
+.unit-info-card .info-stat-value {
+  color: #303133;
+  font-weight: 600;
+}
+
+/* 底部"查看完整录入"按钮 */
+.unit-info-card .info-footer {
+  margin-top: auto;
+  padding: 16px 20px 20px;
+  border-top: 1px solid #f0f2f5;
+}
+.unit-info-card .info-detail-btn {
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1f3a5f, #2c5282);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  letter-spacing: 1px;
+}
+.unit-info-card .info-detail-btn:hover {
+  background: linear-gradient(135deg, #2c5282, #1f3a5f);
+  box-shadow: 0 4px 12px rgba(31, 58, 95, 0.3);
+  transform: translateY(-1px);
+}
+.unit-info-card .info-detail-arrow {
+  font-size: 16px;
+  transition: transform 0.2s ease;
+}
+.unit-info-card .info-detail-btn:hover .info-detail-arrow {
+  transform: translateX(3px);
 }
 
 @media (max-width: 768px) {

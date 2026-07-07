@@ -33,12 +33,13 @@ function progressColor(percentage: number): string {
 }
 
 function click() {
-  store.selectUnit(props.unit)
+  // 只 emit：选中逻辑交给 MapPage.selectUnit 处理（带 toggle 语义）
+  // 这里不再 store.selectUnit，避免 MapPage.toggle 误判为"重复点同一单元"
   emit('select', props.unit)
 }
 
 function openDetail() {
-  store.selectUnit(props.unit)
+  // 双击开抽屉：emit 后由 MapPage.openDetail 负责 store.selectUnit + drawerOpen
   emit('detail', props.unit)
 }
 </script>
@@ -47,6 +48,7 @@ function openDetail() {
   <div
     class="unit-card"
     :class="{ active: isActive }"
+    :data-unit-id="unit.id"
     @click="click"
     @dblclick="openDetail"
     @mouseenter="store.hoverUnit(unit)"

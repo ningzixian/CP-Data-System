@@ -79,6 +79,7 @@ const COORD_PRECISION = 6
 const COMMUNITIES = [
   '南海家园七里',
   '南海家园六里',
+  '南海家园三里',
 ] as const
 
 /** 加载并解析一个小区的全部 5 份 CSV
@@ -196,7 +197,7 @@ async function loadCommunityData(community: string): Promise<{
       })
       .filter((x): x is CsvInlet => !!x)
 
-    return { rawUnits, joints, pipes, regulators, inlets }
+    return { community, rawUnits, joints, pipes, regulators, inlets }
   } catch (err) {
     console.warn(`[Facilities] 跳过小区 ${community}(加载失败):`, err)
     return { rawUnits: [], joints: [], pipes: [], regulators: [], inlets: [] }
@@ -417,6 +418,15 @@ export async function loadFacilities(): Promise<FacilitiesData> {
     `${pipes.length} 段管道、` +
     `${regulators.length} 个调压箱`,
   )
+  // 诊断 log:按小区分组的加载数量,排查"某小区没显示"问题
+  console.log('[Facilities] 按小区加载汇总:', communities.map((c) => ({
+    community: c.community,
+    units: c.rawUnits.length,
+    joints: c.joints.length,
+    pipes: c.pipes.length,
+    regulators: c.regulators.length,
+    inlets: c.inlets.length,
+  })))
   console.log('[Facilities] 网络图节点数：', nodes.length)
   console.log('[Facilities] joint 归属分布：', jointCountByUnit)
   console.log('[Facilities] inlet 归属分布：', inletCountByUnit)

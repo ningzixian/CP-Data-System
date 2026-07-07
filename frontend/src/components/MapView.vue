@@ -558,14 +558,17 @@ function renderUnitPolygons() {
       L.DomEvent.stopPropagation(e)
       clearSelection()
       const unit = store.units.find((x) => x.id === u.id)
-      if (unit) { store.selectUnit(unit); emit('select', unit) }
+      // 只 emit：选中逻辑交给 MapPage.selectUnit 处理（带 toggle 语义）
+      // 这里不再 store.selectUnit，避免 MapView 提前选中后 MapPage.toggle 误判为"重复点"
+      if (unit) emit('select', unit)
     })
     // dblclick → 打开详情（同时也会触发 click，但顺序是 click 先，dblclick 后）
     poly.on('dblclick', (e: any) => {
       L.DomEvent.stopPropagation(e)  // 阻止地图 dblclick 缩放
       clearSelection()
       const unit = store.units.find((x) => x.id === u.id)
-      if (unit) { store.selectUnit(unit); emit('detail', unit) }
+      // 只 emit：选中逻辑交给 MapPage.openDetail 处理
+      if (unit) emit('detail', unit)
     })
 
     poly.addTo(unitPolyLayer!)
@@ -801,19 +804,19 @@ function showDetailView() {
   progressHighlightLayer?.addTo(map!)
   facilityHighlightLayer?.addTo(map!)
 
-  // 3) 给每个 detail 元素加随机 animation-delay(0~400ms 错峰)
-  // 包含三个 pane:overlay(管线/边界)、marker(调压箱等)、progressDefault(进度圆默认态)
+  // 3) 给下落的 marker 加随机 animation-delay(0~180ms 错峰)
+  // SVG path 只做轻量淡入，避免大量管线/边界同时 transform 导致掉帧。
   if (mapRef.value) {
     const els = mapRef.value.querySelectorAll<HTMLElement>(
-      '.leaflet-overlay-pane path, .leaflet-marker-pane .leaflet-marker-icon > .facility-anim, .leaflet-progressDefault-pane .leaflet-marker-icon > *',
+      '.leaflet-marker-pane .leaflet-marker-icon > .facility-anim, .leaflet-progressDefault-pane .leaflet-marker-icon > *',
     )
     els.forEach((el) => {
-      el.style.animationDelay = `${(Math.random() * 0.4).toFixed(3)}s`
+      el.style.animationDelay = `${(Math.random() * 0.18).toFixed(3)}s`
     })
     // 4) 触发下落入场
     mapRef.value.classList.add('detail-fading')
-    // 5) 动画结束后移除 .detail-fading(0.75s 落地 + 0.4s 错峰 + 50ms buffer = 1.2s)
-    setTimeout(() => mapRef.value?.classList.remove('detail-fading'), 1200)
+    // 5) 动画结束后移除 .detail-fading(0.5s 落地 + 0.18s 错峰 + 70ms buffer = 0.75s)
+    setTimeout(() => mapRef.value?.classList.remove('detail-fading'), 750)
   }
 
   // 6) 大圆渐隐完（0.45s + 30ms buffer）后再移除 DOM（这是之前漏掉的关键步骤）

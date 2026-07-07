@@ -5,6 +5,7 @@ import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import InspectionForm from '@/components/InspectionForm.vue'
+import UnitInfoCard from '@/components/UnitInfoCard.vue'
 import type { CorrosionUnit } from '@/types/models'
 
 const store = useCpStore()
@@ -12,6 +13,13 @@ const mapRef = ref<InstanceType<typeof MapView> | null>(null)
 
 const drawerOpen = ref(false)
 const activeTab = ref('')
+
+/** 右侧 UnitInfoCard 显示开关
+ *  - 与 drawerOpen 互斥:单击单元 → UnitInfoCard 滑入,双击/打开抽屉 → UnitInfoCard 滑出
+ *  - 默认 false,避免初始/无选中态时卡片在画面外"占位"干扰布局
+ *  - 关抽屉时也置 false(关完抽屉后是空白态,用户要重新点单元才会再出卡片)
+ */
+const unitCardVisible = ref(false)
 
 /** 小区清单（固定顺序，与侧边栏菜单一致）
  *  - 决定 communities 计算的展示顺序与“占位”位置
@@ -127,12 +135,44 @@ const communityActive = ref<string>('')
 const lastFocusedCommunity = ref<string>('')
 
 function selectUnit(u: CorrosionUnit) {
+  // 重复点同一单元 → 不响应,保持当前选中状态
+  //  - 之前是 toggle off(取消选中),这导致双击 B 的 click 2 触发 selectUnit(B) → store.selectUnit(null)
+  //    把 dblclick 即将设的选中态打回去,抽屉闪一下就关
+  //  - 改成"点已选单元不响应",click 2 走 selectUnit 也不改 store/drawerOpen 状态,不影响 dblclick 后续
+  if (store.selectedUnit?.id === u.id) return
   store.selectUnit(u)
-  // 单击只选中，不开抽屉
+  // 单击只选中，不开抽屉 —— 关掉可能开着的抽屉，显示单元卡片
+  drawerOpen.value = false
+  unitCardVisible.value = true
 }
+
+/**
+ * 选中单元变化时：展开对应小区 + 滚动侧栏到对应 UnitCard
+ * - 触发源不区分：地图 poly 点击、UnitCard 点击、小区大圆点击最终都会改 store.selectedUnit
+ * - 滚动用 block:'center',即使时机稍早,卡片也会落在可视区中心而不是顶部
+ * - 400ms 是给 el-collapse accordion 展开过渡留的 buffer(默认 300ms + 100ms 余量)
+ *   时机错了会滚到折叠态 offsetTop,卡片位置算错
+ */
+watch(() => store.selectedUnit?.id, (newId, oldId) => {
+  if (newId === undefined || newId === oldId) return
+  const unit = store.selectedUnit
+  if (!unit) return
+  // 1) 展开对应小区（accordion 单选,直接赋值切换）
+  const communityName = communityOf(unit)
+  if (communityName !== '未分类' && communityActive.value !== communityName) {
+    communityActive.value = communityName
+  }
+  // 2) 等展开动画跑完再滚
+  setTimeout(() => {
+    const el = document.querySelector(`[data-unit-id="${unit.id}"]`)
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, 400)
+})
 
 function openDetail(u: CorrosionUnit) {
   store.selectUnit(u)
+  // 双击 / 卡片"查看完整录入" 触发抽屉 —— 隐藏卡片,跟 drawer 互斥
+  unitCardVisible.value = false
   drawerOpen.value = true
   activeTab.value = store.items[0]?.code || ''
   // 不再这里调 flyTo — MapView 里 store.selectedUnit 的 watch 会统一飞到单元,
@@ -140,7 +180,14 @@ function openDetail(u: CorrosionUnit) {
 }
 
 function onDrawerClosed() {
+  // 抽屉关闭 → 卡片也保持隐藏,选区清空,等用户再次单击/双击才重新出现
+  unitCardVisible.value = false
   store.selectUnit(null)
+}
+
+/** 右侧 UnitInfoCard 底部"查看完整录入"按钮回调 → 触发抽屉 */
+function openDetailFromCard() {
+  if (store.selectedUnit) openDetail(store.selectedUnit)
 }
 
 /** 标记"上次点的大圆名字",watch 里如果新值跟它匹配就跳过
@@ -317,6 +364,11 @@ const tabItems = computed(() =>
         <div><span style="display:inline-block;width:8px;height:8px;background:#909399;border-radius:50%;vertical-align:middle;margin-right:8px"></span>引入口</div>
       </div>
     </div>
+
+    <UnitInfoCard
+      :visible="unitCardVisible"
+      @open-detail="openDetailFromCard"
+    />
 
     <el-drawer
       v-model="drawerOpen"
