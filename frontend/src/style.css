@@ -247,6 +247,101 @@ html, body, #app {
 
 .map-legend > div { padding: 2px 0; }
 
+/* 图例分两块:上面只读(进度状态),下面可勾选(设施显隐) */
+.map-legend .legend-section--toggle {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #ebeef5;
+}
+
+/* 可勾选行:label 整体可点击,布局跟原 div 保持一致 */
+.map-legend .legend-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.map-legend .legend-row input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  cursor: pointer;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.map-legend .legend-row .legend-label {
+  /* 图标占位由内联 span 提供,这里只保证文字纵向居中 */
+  line-height: 1;
+}
+
+/* 取消勾选 → 整行半透明灰显,直观表达"该项已隐藏"
+ * - opacity 而不是 color,避免子元素的内联 color 覆盖失效
+ * - transition 0.15s 让状态切换有视觉反馈而不是突变
+ */
+.map-legend .legend-row.is-off {
+  opacity: 0.4;
+}
+.map-legend .legend-row.is-off:hover {
+  opacity: 0.7;  /* hover 时稍微提亮,提示用户可点回去 */
+}
+
+/* ========== 设施入场动效(按元素类型分三档,层次丰富)==========
+ * 1. 管线(.pipe-line):画线效果 —— stroke-dashoffset 2000 → 0,管线像被"画"出来
+ *    - 视觉最独特,跟普通缩放/淡入完全不同,看一眼就知道"管线"在动
+ *    - stroke-dasharray 必须显式设一个足够大的数覆盖所有管线长度
+ * 2. 控制单元多边形(SVG path):弹性缩放 —— scale 0.5 → 1 + 弹性回弹
+ *    - transform-box: fill-box 让 origin 在 path 中心(Chrome 64+/FF 55+/Safari 11.1+)
+ *    - 不用画线是因为多边形 fill 区没法用 stroke-dashoffset 表达"绘制"
+ * 3. marker(进度圆/调压箱/绝缘接头/引入口):opacity 淡入
+ *    - Leaflet 给 marker._icon 设 inline transform,会覆盖 CSS scale,marker 只能 opacity
+ *    - 整体节奏:管线先画完(0.5s)→ 多边形砰一下(0.4s 弹性)→ marker 淡入(0.25s)
+ *
+ * 出场(.facility-fade-out):取消勾选触发,opacity 1 → 0,100ms 后才真正 remove
+ *   - 三类元素统一用 opacity 渐隐,简单可靠
+ *   - !important 强制覆盖 marker 的 inline style
+ */
+.facility-fade-in {
+  opacity: 0;
+  transition: opacity 0.25s ease-out;
+}
+.facility-fade-in-shown {
+  opacity: 1;
+}
+
+/* SVG path(多边形/管线)的弹性缩放 —— 用 path 标签选择器排除 marker(divIcon 不是 path) */
+path.facility-fade-in {
+  transform: scale(0.5);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 0.25s ease-out, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+path.facility-fade-in-shown {
+  transform: scale(1);
+}
+
+/* 管线专属:画线效果覆盖上面 path 的 scale + 加 stroke 动画
+ * - .pipe-line 比 path 更具体,CSS 后写就赢,无需 !important
+ * - 2000 是覆盖所有管线长度的保守值(实际 path 长度通过 getTotalLength() 可知,但 CSS 没法动态获取)
+ *   长度 < 2000 的会瞬间显示完整;长度 > 2000 的画线到 2000 处停住(实际项目中管线都在几百米内,2000 够)
+ * - 完成后(.facility-fade-in-shown)恢复 stroke-dasharray: none,管线回到默认实线
+ */
+.pipe-line.facility-fade-in {
+  stroke-dasharray: 2000;
+  stroke-dashoffset: 2000;
+  transform: none;
+  transition: opacity 0.25s ease-out, stroke-dashoffset 0.5s ease-out;
+}
+.pipe-line.facility-fade-in-shown {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+  transform: none;
+}
+
+.facility-fade-out {
+  opacity: 0 !important;
+  transition: opacity 0.1s ease-in !important;
+}
+
 .unit-marker {
   background: transparent !important;
   border: none !important;
@@ -623,22 +718,8 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   margin: 0 2px;
 }
 
-.unit-info-card .info-divider {
-  margin: 16px 20px;
-  height: 1px;
-  background: #f0f2f5;
-}
-
-/* 基础属性区（2×3 网格）：单元面积/管道长度/引入口/绝缘接头/起止里程 */
-.unit-info-card .info-section-title {
-  font-size: 12px;
-  color: #909399;
-  font-weight: 600;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-  padding: 0 20px;
-}
 .unit-info-card .info-attrs {
+  margin-top: 18px;
   padding: 0 20px;
 }
 .unit-info-card .info-attrs-grid {
@@ -676,42 +757,18 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   margin-left: 2px;
 }
 
-/* 关键数据 */
-.unit-info-card .info-stats {
-  padding: 0 20px 16px;
-}
-.unit-info-card .info-stat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  font-size: 13px;
-  border-bottom: 1px dashed #f0f2f5;
-}
-.unit-info-card .info-stat-row:last-child {
-  border-bottom: none;
-}
-.unit-info-card .info-stat-label {
-  color: #909399;
-}
-.unit-info-card .info-stat-value {
-  color: #303133;
-  font-weight: 600;
-}
-
 /* 底部"查看完整录入"按钮 */
 .unit-info-card .info-footer {
   margin-top: auto;
-  padding: 16px 20px 20px;
-  border-top: 1px solid #f0f2f5;
+  padding: 11px 20px 15px;
 }
 .unit-info-card .info-detail-btn {
   width: 100%;
   height: 40px;
-  border: none;
+  border: 1px solid #ebeef5;
   border-radius: 8px;
-  background: linear-gradient(135deg, #1f3a5f, #2c5282);
-  color: #fff;
+  background: #fafbfc;
+  color: #1f3a5f;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -719,13 +776,13 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, margin 0.2s ease;
   letter-spacing: 1px;
+  margin-top: -16px;
 }
 .unit-info-card .info-detail-btn:hover {
-  background: linear-gradient(135deg, #2c5282, #1f3a5f);
-  box-shadow: 0 4px 12px rgba(31, 58, 95, 0.3);
-  transform: translateY(-1px);
+  background: #f0f8ff;
+  border-color: #409eff;
 }
 .unit-info-card .info-detail-arrow {
   font-size: 16px;

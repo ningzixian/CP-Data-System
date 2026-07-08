@@ -14,6 +14,21 @@ const mapRef = ref<InstanceType<typeof MapView> | null>(null)
 const drawerOpen = ref(false)
 const activeTab = ref('')
 
+/** 五种设施的显隐状态,左下角图例面板的 checkbox 控制
+ *  - 全部默认 true,跟改之前行为一致
+ *  - 通过 :visibility prop 传给 MapView,子组件 watch 同步到地图 layer group
+ *  - 取消勾选 → 对应设施从地图上消失(不销毁,再次勾选回来即可)
+ *  - 注意:勾选状态在小区概览模式下不影响(子组件 applyFacilityVisibility 在 isCommunityView 时 early return,
+ *    缩放到细节视图时再按当前勾选状态决定显示哪些)
+ */
+const facilityVisibility = ref({
+  unit: true,        // 控制单元范围(多边形外环 + 进度圆)
+  pipe: true,        // 低压管线
+  joint: true,       // 绝缘接头
+  regulator: true,   // 调压箱
+  inlet: true,       // 引入口
+})
+
 /** 右侧 UnitInfoCard 显示开关
  *  - 与 drawerOpen 互斥:单击单元 → UnitInfoCard 滑入,双击/打开抽屉 → UnitInfoCard 滑出
  *  - 默认 false,避免初始/无选中态时卡片在画面外"占位"干扰布局
@@ -347,21 +362,44 @@ const tabItems = computed(() =>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
+      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
       <div class="map-legend">
-        <div><span class="dot" style="background:#67c23a"></span>已完成</div>
-        <div><span class="dot" style="background:#e6a23c"></span>进行中</div>
-        <div><span class="dot" style="background:#909399"></span>待开始</div>
-        <div><span class="dot" style="background:#f56c6c"></span>异常</div>
-        <div style="margin-top:6px;padding-top:6px;border-top:1px solid #ebeef5">
-          <span style="display:inline-block;width:14px;height:10px;background:rgba(103,194,58,0.18);border:1.5px dashed #67c23a;vertical-align:middle;margin-right:6px"></span>低压制控制单元
+        <!-- 进度状态图例(只读,纯说明) -->
+        <div class="legend-section legend-section--readonly">
+          <div><span class="dot" style="background:#67c23a"></span>已完成</div>
+          <div><span class="dot" style="background:#e6a23c"></span>进行中</div>
+          <div><span class="dot" style="background:#909399"></span>待开始</div>
+          <div><span class="dot" style="background:#f56c6c"></span>异常</div>
         </div>
-        <div>
-          <span style="display:inline-block;width:18px;height:0;border-top:3px solid #67c23a;vertical-align:middle;margin-right:6px"></span>低压燃气管道
+
+        <!-- 设施显隐面板(可勾选,checkbox 控制地图 layer) -->
+        <div class="legend-section legend-section--toggle">
+          <label class="legend-row" :class="{ 'is-off': !facilityVisibility.unit }">
+            <input type="checkbox" v-model="facilityVisibility.unit" />
+            <span style="display:inline-block;width:14px;height:10px;background:rgba(103,194,58,0.18);border:1.5px dashed #67c23a;vertical-align:middle;margin-right:6px"></span>
+            <span class="legend-label">低压制控制单元</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !facilityVisibility.pipe }">
+            <input type="checkbox" v-model="facilityVisibility.pipe" />
+            <span style="display:inline-block;width:18px;height:0;border-top:3px solid #67c23a;vertical-align:middle;margin-right:6px"></span>
+            <span class="legend-label">低压燃气管道</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !facilityVisibility.joint }">
+            <input type="checkbox" v-model="facilityVisibility.joint" />
+            <span style="color:#f56c6c;font-weight:900;font-size:14px;margin-right:4px">✕</span>
+            <span class="legend-label">绝缘接头</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !facilityVisibility.regulator }">
+            <input type="checkbox" v-model="facilityVisibility.regulator" />
+            <span style="display:inline-block;width:14px;height:14px;background:#1890ff;border-radius:3px;vertical-align:middle;margin-right:6px;color:#fff;font-size:10px;text-align:center;line-height:14px">调</span>
+            <span class="legend-label">调压箱</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !facilityVisibility.inlet }">
+            <input type="checkbox" v-model="facilityVisibility.inlet" />
+            <span style="display:inline-block;width:8px;height:8px;background:#909399;border-radius:50%;vertical-align:middle;margin-right:8px"></span>
+            <span class="legend-label">引入口</span>
+          </label>
         </div>
-        <div><span style="color:#f56c6c;font-weight:900;font-size:14px;margin-right:4px">✕</span>绝缘接头</div>
-        <div><span style="display:inline-block;width:14px;height:14px;background:#1890ff;border-radius:3px;vertical-align:middle;margin-right:6px;color:#fff;font-size:10px;text-align:center;line-height:14px">调</span>调压箱</div>
-        <div><span style="display:inline-block;width:8px;height:8px;background:#909399;border-radius:50%;vertical-align:middle;margin-right:8px"></span>引入口</div>
       </div>
     </div>
 

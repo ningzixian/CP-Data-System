@@ -99,19 +99,6 @@ const pipeLengthM = computed(() => {
   return Math.round(total).toLocaleString('zh-CN')
 })
 
-function fmtRecent(d?: string) {
-  if (!d) return '—'
-  const date = new Date(d)
-  const now = Date.now()
-  const diffMs = now - date.getTime()
-  const diffH = Math.floor(diffMs / 3600000)
-  if (diffH < 1) return '刚刚'
-  if (diffH < 24) return `${diffH} 小时前`
-  const diffD = Math.floor(diffH / 24)
-  if (diffD < 30) return `${diffD} 天前`
-  return date.toLocaleDateString('zh-CN')
-}
-
 function getItemStatus(code: string): string {
   if (!unit.value) return 'pending'
   return store.getItemStatus(unit.value.id, code)
@@ -163,11 +150,8 @@ function itemStatusLabel(status: string): string {
       9 项检测 <strong>{{ completedCount }}</strong> / 9 完成
     </div>
 
-    <div class="info-divider"></div>
-
     <!-- 基础属性：单元的物理/空间信息(给领导汇报"这个单元有多大、多长") -->
     <section class="info-attrs">
-      <div class="info-section-title">基础属性</div>
       <div class="info-attrs-grid">
         <div class="info-attr-cell">
           <div class="info-attr-label">单元面积</div>
@@ -193,24 +177,6 @@ function itemStatusLabel(status: string): string {
           <div class="info-attr-label">终点里程</div>
           <div class="info-attr-value">{{ unit.end_mileage ?? '—' }} <small>m</small></div>
         </div>
-      </div>
-    </section>
-
-    <div class="info-divider"></div>
-
-    <!-- 关键数据 -->
-    <section class="info-stats">
-      <div class="info-stat-row">
-        <span class="info-stat-label">✕ 绝缘接头</span>
-        <span class="info-stat-value">{{ jointCount }} 个</span>
-      </div>
-      <div class="info-stat-row">
-        <span class="info-stat-label">● 引入口</span>
-        <span class="info-stat-value">{{ inletCount }} 个</span>
-      </div>
-      <div class="info-stat-row">
-        <span class="info-stat-label">🕐 最近检测</span>
-        <span class="info-stat-value">{{ fmtRecent(unit.last_inspection_at) }}</span>
       </div>
     </section>
 

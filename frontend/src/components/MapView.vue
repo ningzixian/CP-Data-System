@@ -24,6 +24,25 @@ const emit = defineEmits<{
 }>()
 const store = useCpStore()
 
+/** 设施显隐状态 key
+ *  - unit: 控制单元范围(多边形外环 + 进度圆,绑定一组)
+ *  - pipe: 低压管线
+ *  - joint: 绝缘接头
+ *  - regulator: 调压箱
+ *  - inlet: 引入口
+ */
+export type FacilityKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet'
+export type FacilityVisibility = Record<FacilityKey, boolean>
+
+const props = withDefaults(defineProps<{
+  units: CorrosionUnit[]
+  points: any[]
+  /** 五种设施的显隐状态,父组件用 v-bind 传入,任一字段 false → 对应 layer 从地图移除(不销毁) */
+  visibility?: FacilityVisibility
+}>(), {
+  visibility: () => ({ unit: true, pipe: true, joint: true, regulator: true, inlet: true }),
+})
+
 const mapRef = ref<HTMLDivElement | null>(null)
 let map: LeafletMap | null = null
 
@@ -302,6 +321,122 @@ function moveMarkerToPaneAfter(marker: any, targetPane: string, delay: number) {
 
 function afterNextFrame(fn: () => void) {
   requestAnimationFrame(() => requestAnimationFrame(fn))
+}
+
+/** 把 layer addTo/remove 到 map(幂等:已在/不在时不重复操作)
+ *  - 用于 visibility 切换,只控制可见性,不销毁 marker / polyline
+ *  - 入场按元素类型分三档动效(管线画线/多边形弹性/marker 淡入),见 runEnterAnimation
+ *  - 出场跑快速 opacity 渐隐 + 延迟 remove,见 runLeaveAnimation
+ *  - animate=false:showDetailView 用,detailDropIn 已经在跑入场下落,避免再叠加
+ */
+function toggleLayer(layer: LayerGroup | null, visible: boolean, animate = true) {
+  if (!layer || !map) return
+  if (visible && !map.hasLayer(layer)) {
+    layer.addTo(map)
+    if (animate) runEnterAnimation(layer)
+  } else if (!visible && map.hasLayer(layer)) {
+    if (animate) {
+      runLeaveAnimation(layer, () => layer.remove())
+    } else {
+      layer.remove()
+    }
+  }
+}
+
+/** 显隐动画时长(ms),略大于 CSS transition 让 setTimeout 在动画结束后再 cleanup
+ *  - 出场 0.1s transition + 50ms buffer → 150ms
+ *  - 入场最慢的是管线画线 0.5s,加 50ms buffer → 550ms(等画线完成再 cleanup class)
+ */
+const FACILITY_LEAVE_DURATION = 150
+const FACILITY_ENTER_DURATION = 550
+
+/** 给单个 sub layer(polyline/polygon/marker)加显隐过渡 class
+ *  - SVG path(管线/多边形)用 _path:CSS scale 和 stroke-dashoffset 都有效
+ *  - HTML marker 用 getElement() 返回 marker._icon:Leaflet 设了 inline transform,
+ *    CSS scale 和 stroke 都被覆盖,只有 opacity 过渡可见(已足够淡入)
+ */
+function applyVisibilityState(sub: any, state: 'in' | 'shown' | 'out') {
+  const el = sub._path || sub.getElement?.()
+  if (!el) return
+  el.classList.remove('facility-fade-in', 'facility-fade-in-shown', 'facility-fade-out')
+  if (state === 'in') el.classList.add('facility-fade-in')
+  else if (state === 'shown') el.classList.add('facility-fade-in-shown')
+  else if (state === 'out') el.classList.add('facility-fade-out')
+}
+
+function clearVisibilityState(sub: any) {
+  const el = sub._path || sub.getElement?.()
+  if (!el) return
+  el.classList.remove('facility-fade-in', 'facility-fade-in-shown', 'facility-fade-out')
+}
+
+/** 入场动画:layer.addTo 之后调用
+ *  - 三档不同动效由 CSS 区分:
+ *    .pipe-line  → stroke-dashoffset 2000 → 0 画线效果
+ *    path 非管线 → scale 0.5 → 1 + 弹性回弹
+ *    marker      → opacity 0 → 1 淡入
+ *  - 时序:立即加 .facility-fade-in(锁定起始态),双 RAF 后切到 .facility-fade-in-shown(触发 transition)
+ *  - 双 RAF 强制 reflow,确保浏览器把起始态"提交"后再切换,否则两帧被合并看不到过渡
+ *  - 动画结束(550ms+50ms buffer)清掉两个 class,避免污染后续 hover/selected 的 transform/stroke/opacity
+ */
+function runEnterAnimation(layer: LayerGroup) {
+  layer.eachLayer((sub: any) => applyVisibilityState(sub, 'in'))
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      layer.eachLayer((sub: any) => applyVisibilityState(sub, 'shown'))
+      setTimeout(() => {
+        layer.eachLayer((sub: any) => clearVisibilityState(sub))
+      }, FACILITY_ENTER_DURATION + 50)
+    })
+  })
+}
+
+/** 出场渐隐:layer.remove() 之前调用
+ *  - 给每个 path/marker 加 .facility-fade-out(CSS:opacity 0 + 0.1s ease-in transition)
+ *  - setTimeout 150ms 后调 onDone,真正 remove layer
+ *  - 出场期间元素仍在地图上,用户视觉上看到"快速淡出",而不是突然消失
+ *  - remove 前清理 class,下次 addTo 后元素回到默认 opacity:1,不会被残留 class 影响
+ */
+function runLeaveAnimation(layer: LayerGroup, onDone: () => void) {
+  layer.eachLayer((sub: any) => {
+    const el = sub._path || sub.getElement?.()
+    if (!el) return
+    el.classList.add('facility-fade-out')
+  })
+  setTimeout(() => {
+    layer.eachLayer((sub: any) => {
+      const el = sub._path || sub.getElement?.()
+      if (!el) return
+      el.classList.remove('facility-fade-out')
+    })
+    onDone()
+  }, FACILITY_LEAVE_DURATION)
+}
+
+/** 按 props.visibility 把五种设施同步到地图
+ *  - 这是显隐状态的"权威应用函数":所有地方(addTo/remove 细节图层)都应该走它,而不是直接 addTo
+ *  - 关键约束:小区概览模式(isCommunityView=true)下不操作细节图层——
+ *    小区大圆视图不该被任何设施图层污染
+ *  - 控制单元范围(unit)同时控制多边形 + 进度圆两个 layer,三者绑成一组切换
+ *  - animate: 是否跑入场/出场过渡动画
+ *    - true(默认):用户勾选/取消勾选时用
+ *    - false:showDetailView 用,detailDropIn 已经在跑入场下落,避免再叠加
+ */
+function applyFacilityVisibility(opts: { animate?: boolean } = {}) {
+  if (!map) return
+  if (isCommunityView) return  // 小区概览模式:细节图层一律不在,visibility 切换不应破坏
+  const vis = props.visibility
+  if (!vis) return
+  const animate = opts.animate !== false
+  // 控制单元范围:多边形 + 两个进度圆 layer 一起切
+  toggleLayer(unitPolyLayer, vis.unit, animate)
+  toggleLayer(progressDefaultLayer, vis.unit, animate)
+  toggleLayer(progressHighlightLayer, vis.unit, animate)
+  // 其余四种独立切换
+  toggleLayer(pipeLayer, vis.pipe, animate)
+  toggleLayer(jointLayer, vis.joint, animate)
+  toggleLayer(regulatorLayer, vis.regulator, animate)
+  toggleLayer(inletLayer, vis.inlet, animate)
 }
 
 function bumpFacilityVisualToken(marker: any) {
@@ -794,14 +929,10 @@ function showDetailView() {
     })
   }
 
-  // 2) 立即加细节图层（DOM 同步进 pane）
-  unitPolyLayer?.addTo(map!)
-  pipeLayer?.addTo(map!)
-  regulatorLayer?.addTo(map!)
-  inletLayer?.addTo(map!)
-  jointLayer?.addTo(map!)
-  progressDefaultLayer?.addTo(map!)
-  progressHighlightLayer?.addTo(map!)
+  // 2) 立即加细节图层(走 visibility 权威函数,被勾选掉的设施不会强显示)
+  //    animate=false:detailDropIn 已经在跑入场下落,不要再叠加渐隐/缩放/画线
+  applyFacilityVisibility({ animate: false })
+  // facilityHighlightLayer 是空 layer,仅供 DOM 搬运用,无条件 addTo
   facilityHighlightLayer?.addTo(map!)
 
   // 3) 给下落的 marker 加随机 animation-delay(0~180ms 错峰)
@@ -974,6 +1105,17 @@ watch(
   () => store.facilities,
   () => renderAll(),
   { deep: false },
+)
+
+// 监听 props.visibility 变化:五种设施的勾选状态变更时同步到地图
+// - deep: true 因为是普通对象,Vue 默认浅 watch 检测不到内部字段变化
+// - 触发路径:MapPage.checkbox v-model → facilityVisibility[key] 变化 → 子组件 prop 更新 → watch 触发 → applyFacilityVisibility
+// - 在小区概览模式(isCommunityView)下 applyFacilityVisibility 会 early return,
+//   这样不会破坏"小区大圆视图不应被细节图层污染"的规则
+watch(
+  () => props.visibility,
+  () => applyFacilityVisibility(),
+  { deep: true },
 )
 
 // 监听 store.units 变化（records 加载后 progress/status 被回写到 units）
