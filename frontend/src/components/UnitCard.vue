@@ -8,7 +8,6 @@ import type { CorrosionUnit } from '@/types/models'
 const props = defineProps<{ unit: CorrosionUnit }>()
 const emit = defineEmits<{
   (e: 'select', u: CorrosionUnit): void
-  (e: 'detail', u: CorrosionUnit): void
 }>()
 const store = useCpStore()
 
@@ -38,10 +37,6 @@ function click() {
   emit('select', props.unit)
 }
 
-function openDetail() {
-  // 双击开抽屉：emit 后由 MapPage.openDetail 负责 store.selectUnit + drawerOpen
-  emit('detail', props.unit)
-}
 </script>
 
 <template>
@@ -50,7 +45,6 @@ function openDetail() {
     :class="{ active: isActive }"
     :data-unit-id="unit.id"
     @click="click"
-    @dblclick="openDetail"
     @mouseenter="store.hoverUnit(unit)"
     @mouseleave="store.hoverUnit(null)"
   >

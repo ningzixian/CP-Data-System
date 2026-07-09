@@ -245,12 +245,6 @@ export const MOCK_RECORDS: InspectionRecord[] = [
   ...demoRecords,
 ]
 
-// 调试 log
-console.log('[mock] data.ts MOCK_RECORDS 总数:', MOCK_RECORDS.length, '按 unit 分布:')
-const _byUnit: Record<number, number> = {}
-MOCK_RECORDS.forEach((r) => { _byUnit[r.unit_id] = (_byUnit[r.unit_id] || 0) + 1 })
-console.log('[mock] records by unit:', _byUnit)
-
 // 内存里可写的副本（mock 模式下，新建的记录会追加到这份数据上）
 export const mockStore = {
   pipelines: [...MOCK_PIPELINES],

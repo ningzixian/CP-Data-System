@@ -411,26 +411,6 @@ export async function loadFacilities(): Promise<FacilitiesData> {
     }
   })
 
-  console.log(
-    `[Facilities] 加载完成：${units.length} 个低压控制单元、` +
-    `${joints.length} 个绝缘接头（已归属 ${joints.filter((j) => j.unit_id !== undefined).length} 个）、` +
-    `${inlets.length} 个引入口（已归属 ${inlets.filter((i) => i.unit_id !== undefined).length} 个）、` +
-    `${pipes.length} 段管道、` +
-    `${regulators.length} 个调压箱`,
-  )
-  // 诊断 log:按小区分组的加载数量,排查"某小区没显示"问题
-  console.log('[Facilities] 按小区加载汇总:', communities.map((c) => ({
-    community: c.community,
-    units: c.rawUnits.length,
-    joints: c.joints.length,
-    pipes: c.pipes.length,
-    regulators: c.regulators.length,
-    inlets: c.inlets.length,
-  })))
-  console.log('[Facilities] 网络图节点数：', nodes.length)
-  console.log('[Facilities] joint 归属分布：', jointCountByUnit)
-  console.log('[Facilities] inlet 归属分布：', inletCountByUnit)
-
   return {
     units,
     joints,

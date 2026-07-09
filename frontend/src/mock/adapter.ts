@@ -107,7 +107,6 @@ export async function mockAdapter(config: AxiosRequestConfig): Promise<any> {
     const unitId = getParam('unit_id') ? +getParam('unit_id') : undefined
     const itemCode = getParam('item_code')
     let list = [...mockStore.records]
-    console.log('[mock] /api/records GET, total records:', list.length, 'unit_id:', unitId)
     if (unitId !== undefined) list = list.filter((r) => r.unit_id === unitId)
     if (itemCode) list = list.filter((r) => r.item_code === itemCode)
     return delay(ok(list))

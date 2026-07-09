@@ -77,9 +77,6 @@ export const useCpStore = defineStore('cp', () => {
         return { ...u, inspection_progress: progress, inspection_status: status }
       })
 
-      console.log('[store] loadAll: units=', fac.units.length, 'records=', r.length)
-      console.log('[store] unit progress:', units.value.map((u) => `${u.name}=${Math.round(u.inspection_progress*100)}%/${u.inspection_status}`).join(', '))
-
       // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
       points.value = fac.joints
         .filter((j) => j.unit_id !== undefined)

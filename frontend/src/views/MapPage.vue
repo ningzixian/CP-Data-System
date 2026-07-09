@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useCpStore } from '@/stores/cp'
 import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
@@ -29,12 +29,7 @@ const facilityVisibility = ref({
   inlet: true,       // 引入口
 })
 
-/** 右侧 UnitInfoCard 显示开关
- *  - 与 drawerOpen 互斥:单击单元 → UnitInfoCard 滑入,双击/打开抽屉 → UnitInfoCard 滑出
- *  - 默认 false,避免初始/无选中态时卡片在画面外"占位"干扰布局
- *  - 关抽屉时也置 false(关完抽屉后是空白态,用户要重新点单元才会再出卡片)
- */
-const unitCardVisible = ref(false)
+const unitCardVisible = computed(() => !!store.selectedUnit && !drawerOpen.value)
 
 /** 小区清单（固定顺序，与侧边栏菜单一致）
  *  - 决定 communities 计算的展示顺序与“占位”位置
@@ -148,17 +143,34 @@ const communityActive = ref<string>('')
  *  - 空字符串表示"暂无聚焦动作"(初始状态)
  */
 const lastFocusedCommunity = ref<string>('')
+const COMMUNITY_ZOOM_DURATION_MS = 600
+let selectedUnitScrollTimer: ReturnType<typeof window.setTimeout> | null = null
+let communityZoomScrollTimer: ReturnType<typeof window.setTimeout> | null = null
+let focusedCommunityScrollTimer: ReturnType<typeof window.setTimeout> | null = null
+
+function clearSidebarTimers() {
+  if (selectedUnitScrollTimer !== null) {
+    window.clearTimeout(selectedUnitScrollTimer)
+    selectedUnitScrollTimer = null
+  }
+  if (communityZoomScrollTimer !== null) {
+    window.clearTimeout(communityZoomScrollTimer)
+    communityZoomScrollTimer = null
+  }
+  if (focusedCommunityScrollTimer !== null) {
+    window.clearTimeout(focusedCommunityScrollTimer)
+    focusedCommunityScrollTimer = null
+  }
+}
 
 function selectUnit(u: CorrosionUnit) {
   // 重复点同一单元 → 不响应,保持当前选中状态
-  //  - 之前是 toggle off(取消选中),这导致双击 B 的 click 2 触发 selectUnit(B) → store.selectUnit(null)
-  //    把 dblclick 即将设的选中态打回去,抽屉闪一下就关
-  //  - 改成"点已选单元不响应",click 2 走 selectUnit 也不改 store/drawerOpen 状态,不影响 dblclick 后续
+  //  - 避免重复点击把当前选中态取消
+  //  - 打开抽屉只通过小卡片里的"查看完整录入"按钮触发
   if (store.selectedUnit?.id === u.id) return
   store.selectUnit(u)
-  // 单击只选中，不开抽屉 —— 关掉可能开着的抽屉，显示单元卡片
+  // 单击只选中，不开抽屉 —— 关掉可能开着的抽屉
   drawerOpen.value = false
-  unitCardVisible.value = true
 }
 
 /**
@@ -178,7 +190,10 @@ watch(() => store.selectedUnit?.id, (newId, oldId) => {
     communityActive.value = communityName
   }
   // 2) 等展开动画跑完再滚
-  setTimeout(() => {
+  if (selectedUnitScrollTimer !== null) window.clearTimeout(selectedUnitScrollTimer)
+  selectedUnitScrollTimer = window.setTimeout(() => {
+    selectedUnitScrollTimer = null
+    if (store.selectedUnit?.id !== newId) return
     const el = document.querySelector(`[data-unit-id="${unit.id}"]`)
     if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, 400)
@@ -186,8 +201,7 @@ watch(() => store.selectedUnit?.id, (newId, oldId) => {
 
 function openDetail(u: CorrosionUnit) {
   store.selectUnit(u)
-  // 双击 / 卡片"查看完整录入" 触发抽屉 —— 隐藏卡片,跟 drawer 互斥
-  unitCardVisible.value = false
+  // 卡片"查看完整录入"触发抽屉,小卡片由 unitCardVisible 自动隐藏
   drawerOpen.value = true
   activeTab.value = store.items[0]?.code || ''
   // 不再这里调 flyTo — MapView 里 store.selectedUnit 的 watch 会统一飞到单元,
@@ -195,9 +209,7 @@ function openDetail(u: CorrosionUnit) {
 }
 
 function onDrawerClosed() {
-  // 抽屉关闭 → 卡片也保持隐藏,选区清空,等用户再次单击/双击才重新出现
-  unitCardVisible.value = false
-  store.selectUnit(null)
+  // 抽屉关闭后保留选中单元,小卡片会由 unitCardVisible 自动恢复
 }
 
 /** 右侧 UnitInfoCard 底部"查看完整录入"按钮回调 → 触发抽屉 */
@@ -245,8 +257,12 @@ watch(communityActive, (newVal, oldVal) => {
   }
   if (!newVal) {
     if (oldVal) {
-      // 合上菜单 → 记住刚收起的小区,后面 watch 会把它滚到 side-panel 顶部
-      lastFocusedCommunity.value = oldVal
+      // 合上菜单时先让地图缩放,再滚动侧栏,避免两个动画抢主线程
+      if (communityZoomScrollTimer !== null) window.clearTimeout(communityZoomScrollTimer)
+      communityZoomScrollTimer = window.setTimeout(() => {
+        communityZoomScrollTimer = null
+        if (communityActive.value === '') lastFocusedCommunity.value = oldVal
+      }, COMMUNITY_ZOOM_DURATION_MS)
     }
     mapRef.value?.zoomToCommunityView()
     return
@@ -276,12 +292,18 @@ watch(lastFocusedCommunity, (name) => {
       return
     }
     // el-collapse 默认 transition 300ms,350ms 留 buffer
-    setTimeout(() => {
+    if (focusedCommunityScrollTimer !== null) window.clearTimeout(focusedCommunityScrollTimer)
+    focusedCommunityScrollTimer = window.setTimeout(() => {
+      focusedCommunityScrollTimer = null
       el.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 350)
   })
   // 立刻 reset,保证下次再设同一个名字也能触发 watch
   lastFocusedCommunity.value = ''
+})
+
+onBeforeUnmount(() => {
+  clearSidebarTimers()
 })
 
 const selectedUnit = computed(() => store.selectedUnit)
@@ -352,7 +374,6 @@ const tabItems = computed(() =>
             :key="u.id"
             :unit="u"
             @select="selectUnit"
-            @detail="openDetail"
           />
           <div v-if="c.units.length === 0" class="community-empty">
             暂无数据
@@ -362,7 +383,7 @@ const tabItems = computed(() =>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" @select="selectUnit" @detail="openDetail" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
+      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" @select="selectUnit" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
       <div class="map-legend">
         <!-- 进度状态图例(只读,纯说明) -->
         <div class="legend-section legend-section--readonly">

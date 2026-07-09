@@ -285,58 +285,7 @@ html, body, #app {
   opacity: 0.7;  /* hover 时稍微提亮,提示用户可点回去 */
 }
 
-/* ========== 设施入场动效(按元素类型分三档,层次丰富)==========
- * 1. 管线(.pipe-line):画线效果 —— stroke-dashoffset 2000 → 0,管线像被"画"出来
- *    - 视觉最独特,跟普通缩放/淡入完全不同,看一眼就知道"管线"在动
- *    - stroke-dasharray 必须显式设一个足够大的数覆盖所有管线长度
- * 2. 控制单元多边形(SVG path):弹性缩放 —— scale 0.5 → 1 + 弹性回弹
- *    - transform-box: fill-box 让 origin 在 path 中心(Chrome 64+/FF 55+/Safari 11.1+)
- *    - 不用画线是因为多边形 fill 区没法用 stroke-dashoffset 表达"绘制"
- * 3. marker(进度圆/调压箱/绝缘接头/引入口):opacity 淡入
- *    - Leaflet 给 marker._icon 设 inline transform,会覆盖 CSS scale,marker 只能 opacity
- *    - 整体节奏:管线先画完(0.5s)→ 多边形砰一下(0.4s 弹性)→ marker 淡入(0.25s)
- *
- * 出场(.facility-fade-out):取消勾选触发,opacity 1 → 0,100ms 后才真正 remove
- *   - 三类元素统一用 opacity 渐隐,简单可靠
- *   - !important 强制覆盖 marker 的 inline style
- */
-.facility-fade-in {
-  opacity: 0;
-  transition: opacity 0.25s ease-out;
-}
-.facility-fade-in-shown {
-  opacity: 1;
-}
-
-/* SVG path(多边形/管线)的弹性缩放 —— 用 path 标签选择器排除 marker(divIcon 不是 path) */
-path.facility-fade-in {
-  transform: scale(0.5);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: opacity 0.25s ease-out, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-path.facility-fade-in-shown {
-  transform: scale(1);
-}
-
-/* 管线专属:画线效果覆盖上面 path 的 scale + 加 stroke 动画
- * - .pipe-line 比 path 更具体,CSS 后写就赢,无需 !important
- * - 2000 是覆盖所有管线长度的保守值(实际 path 长度通过 getTotalLength() 可知,但 CSS 没法动态获取)
- *   长度 < 2000 的会瞬间显示完整;长度 > 2000 的画线到 2000 处停住(实际项目中管线都在几百米内,2000 够)
- * - 完成后(.facility-fade-in-shown)恢复 stroke-dasharray: none,管线回到默认实线
- */
-.pipe-line.facility-fade-in {
-  stroke-dasharray: 2000;
-  stroke-dashoffset: 2000;
-  transform: none;
-  transition: opacity 0.25s ease-out, stroke-dashoffset 0.5s ease-out;
-}
-.pipe-line.facility-fade-in-shown {
-  stroke-dasharray: none;
-  stroke-dashoffset: 0;
-  transform: none;
-}
-
+/* 设施隐藏动效：当前只给控制单元和调压箱使用；其他设施直接 remove */
 .facility-fade-out {
   opacity: 0 !important;
   transition: opacity 0.1s ease-in !important;
@@ -387,11 +336,9 @@ path.facility-fade-in-shown {
 /* 引入口 hover：14px → 24px（scale 1.7），灰 → 蓝，加阴影，提至顶层
  * - 双层结构(跟社区大圆一致):
  *   .leaflet-marker-icon(inlet-marker)  ← Leaflet wrapper,跑定位 translate3d
- *     .facility-anim                    ← 入场动画层,跑 detailDropIn
+ *     .facility-anim                    ← 外层包裹,隔离 Leaflet 定位 transform
  *       <div>                            ← 实际内容层,跑 hover transition
- * - 入场动画跑在外层 .facility-anim,hover transition 跑在最内层 div,两个 transform 分属不同元素,
- *   互不干扰。否则 animation-fill-mode: both 会让 animation 在结束后仍锁住 inner div 的 transform,
- *   hover 时 scale 被压住 → "突然" 没平滑过渡
+ * - hover transition 跑在最内层 div,不和 Leaflet wrapper 的定位 transform 竞争
  * - transform-origin 默认 50% 50%，inner div 的圆心正好对齐 latlng（iconAnchor: [7,7]），
  *   所以围绕圆心放大，位置不偏移
  */
@@ -418,7 +365,7 @@ path.facility-fade-in-shown {
 
 /* 绝缘接头 hover/hovered/selected:放大 + 提至顶层（无阴影，颜色保留红色不变）
  * - 跟引入口一样的视觉一致性,但去掉了 background/box-shadow(接头本来就是红色 ✕)
- * - 双层结构同上,入场动画跑 .facility-anim,hover transition 跑最内层 div
+ * - 双层结构同上,hover transition 跑最内层 div
  * - class z-index:1000 同上无效,真正起作用的是 facilityHighlightPane
  */
 .joint-marker .facility-anim > div {
@@ -435,7 +382,7 @@ path.facility-fade-in-shown {
 }
 
 /* 调压箱 hover/hovered/selected:放大 + 提至顶层,颜色保留蓝色不变
- * 双层结构同上(跟社区大圆一致),入场动画跑 .facility-anim,hover transition 跑最内层 div
+ * 双层结构同上(跟社区大圆一致),hover transition 跑最内层 div
  * 跟绝缘接头规则几乎一样,只是 className 不同,逻辑独立分开写
  */
 .regulator-marker .facility-anim > div {
@@ -540,40 +487,14 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
-/* 细节视图入场：从上方落下，落地弹一下
- *  - 动 SVG path（管线 / 多边形）和 marker 内部 div
- *  - 配合小区大圆渐隐，形成"让位→填充"效果
- *  - 不动 tile pane，底图始终可见
- */
-/* 详情视图入场：从 0.75s 加快到 0.45s（管线/多边形/引入口/调压箱/接头/进度圆全部一起快） */
+/* 小区概览切到设施层级时的整体出现动效；左下角图例勾选不触发这个 class */
+.detail-fading .leaflet-overlay-pane canvas,
+.detail-fading .leaflet-overlay-pane svg path,
 .detail-fading .leaflet-marker-pane .leaflet-marker-icon > .facility-anim,
-.detail-fading .leaflet-progressDefault-pane .leaflet-marker-icon > * {
-  animation: detailDropIn 0.5s cubic-bezier(0.5, 0, 0.55, 1) both;
-  will-change: transform, opacity;
-}
-
-.detail-fading .leaflet-overlay-pane path {
-  animation: detailFadeIn 0.28s ease both;
+.detail-fading .leaflet-progressDefault-pane .leaflet-marker-icon > *,
+.detail-fading .leaflet-progressHighlight-pane .leaflet-marker-icon > * {
+  animation: detailFadeIn 0.2s ease-out both;
   will-change: opacity;
-}
-
-@keyframes detailDropIn {
-  /* 0   从屏幕外 280px 上方坠落，透明 */
-  /* 45% 中段淡入可见 */
-  /* 62% 落到位置稍微下沉 4px（落地挤压）*/
-  /* 74% 弹起到 -8px（第一次回弹）*/
-  /* 86% 二次落地（小幅 2px）*/
-  /* 100% 不写 transform — 关键!
-   * 如果 100% 写 transform: translateY(0),fill-mode: both 会让动画结束后 transform 仍然锁在 translateY(0),
-   * 普通 CSS rule(.hovered / .selected)的 transform: scale(1.7) 被锁住,hover 会"突然"没反应
-   * 不写 transform,让动画结束后 transform 回到"无"状态,hover 的 transform 才能正常生效
-   * 视觉上等价于 transform: scale(1),跟社区大圆 hover 同一个套路 */
-  0%   { transform: translateY(-280px); opacity: 0; }
-  45%  { opacity: 1; }
-  62%  { transform: translateY(4px); }
-  74%  { transform: translateY(-8px); }
-  86%  { transform: translateY(2px); }
-  /* 100% 故意不写 transform */
 }
 
 @keyframes detailFadeIn {
@@ -719,7 +640,7 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
 }
 
 .unit-info-card .info-attrs {
-  margin-top: 18px;
+  margin-top: 23px;
   padding: 0 20px;
 }
 .unit-info-card .info-attrs-grid {
@@ -760,7 +681,8 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
 /* 底部"查看完整录入"按钮 */
 .unit-info-card .info-footer {
   margin-top: auto;
-  padding: 11px 20px 15px;
+  padding: 16px 20px 20px;
+  transform: translateY(-20px);
 }
 .unit-info-card .info-detail-btn {
   width: 100%;
