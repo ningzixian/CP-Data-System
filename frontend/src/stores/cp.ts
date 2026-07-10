@@ -62,20 +62,7 @@ export const useCpStore = defineStore('cp', () => {
       units.value = fac.units
       pipelines.value = p
       items.value = its
-      records.value = r
-
-      // 关键：把 records 算出来的进度回写到 units（让地图上圆圈颜色变化）
-      // 不用 fac.units 直接修改（会污染源数据），用 Object.assign 复制
-      units.value = fac.units.map((u) => {
-        const recs = r.filter((x) => x.unit_id === u.id)
-        const completed = recs.filter((x) => x.status === 'passed' || x.status === 'exception').length
-        const total = its.length
-        const progress = total ? completed / total : 0
-        let status: InspectionStatus = 'pending'
-        if (progress >= 1) status = 'completed'
-        else if (progress > 0) status = 'in_progress'
-        return { ...u, inspection_progress: progress, inspection_status: status }
-      })
+      applyRecords(r)
 
       // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
       points.value = fac.joints
@@ -92,16 +79,36 @@ export const useCpStore = defineStore('cp', () => {
           created_at: new Date().toISOString(),
         }))
 
-      // Dashboard：mock 模式下前端自己算（基于真实 units + records）；
-      //            真实后端模式下走后端 API
-      if (USE_MOCK) {
-        dashboard.value = computeDashboard()
-      } else {
-        dashboard.value = await dashboardApi.get()
-      }
+      if (!USE_MOCK) dashboard.value = await dashboardApi.get()
     } finally {
       loading.value = false
     }
+  }
+
+  function applyRecords(nextRecords: InspectionRecord[]) {
+    records.value = nextRecords
+    const selectedId = selectedUnit.value?.id
+
+    // 把记录算出的进度回写到单元，同时保留当前选中单元。
+    units.value = units.value.map((u) => {
+      const recs = nextRecords.filter((x) => x.unit_id === u.id)
+      const completed = recs.filter((x) => x.status === 'passed' || x.status === 'exception').length
+      const total = items.value.length
+      const progress = total ? completed / total : 0
+      let status: InspectionStatus = 'pending'
+      if (progress >= 1) status = 'completed'
+      else if (progress > 0) status = 'in_progress'
+      return { ...u, inspection_progress: progress, inspection_status: status }
+    })
+    if (selectedId !== undefined && selectedUnit.value) {
+      const updated = units.value.find((u) => u.id === selectedId)
+      if (updated) Object.assign(selectedUnit.value, updated)
+    }
+    if (USE_MOCK) dashboard.value = computeDashboard()
+  }
+
+  async function refreshRecords() {
+    applyRecords(await recordsApi.list())
   }
 
   /**
@@ -172,7 +179,7 @@ export const useCpStore = defineStore('cp', () => {
   return {
     pipelines, units, points, records, dashboard, items, loading,
     facilities, selectedUnit, hoveredUnit, stats,
-    loadAll, unitName, getItemStatus, selectUnit, hoverUnit,
+    loadAll, refreshRecords, unitName, getItemStatus, selectUnit, hoverUnit,
     unitJointCount, unitInletCount,
   }
 })

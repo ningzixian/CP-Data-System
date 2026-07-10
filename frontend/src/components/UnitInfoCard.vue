@@ -117,7 +117,7 @@ function itemStatusLabel(status: string): string {
       appear: 首次挂载也跑 enter 动画(组件常驻后首次 v-if=true)
       v-if: 由 visible prop + store.selectedUnit 共同控制(visible=false 时 leave 动画能跑)
     -->
-    <aside v-if="isOpen" :key="unit?.id" class="unit-info-card">
+    <aside v-if="visible && unit" :key="unit.id" class="unit-info-card">
     <!-- Header：单元名 + 地址 -->
     <header class="info-header">
       <div class="info-name">{{ unit.name }}</div>

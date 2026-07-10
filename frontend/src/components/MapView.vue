@@ -146,6 +146,9 @@ function centerOnSelected() {
 // （隐藏管线/引入口/控制单元进度圆圈，显示小区合并多边形 + 大进度圆圈）
 const COMMUNITY_VIEW_ZOOM = 17
 let isCommunityView = false
+let communityLayersHiddenForZoom = false
+let communityInfoVisible = true
+let zoomAnimationStartLevel: number | null = null
 
 // 小区概览图层（zoom < 15 时显示）
 let communityLayer: LayerGroup | null = null
@@ -243,13 +246,17 @@ function buildInletIcon() {
  *  - index：用于错位出场（每个圆圈延迟 120ms 出现）
  *  - 出场动效 communityPopIn 在 style.css 定义（scale + opacity + 轻微回弹）
  */
-function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress: number, hasException = false, index = 0) {
-  const percent = Math.round(avgProgress * 100)
-  const color = hasException ? '#f56c6c'
+function communityProgressColor(avgProgress: number, hasException = false) {
+  return hasException ? '#f56c6c'
     : avgProgress >= 1 ? '#67c23a'
     : avgProgress >= 0.8 ? '#85ce61'
     : avgProgress > 0 ? '#e6a23c'
     : '#c0c4cc'
+}
+
+function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress: number, hasException = false, index = 0) {
+  const percent = Math.round(avgProgress * 100)
+  const color = communityProgressColor(avgProgress, hasException)
   const delay = (index * 0.12).toFixed(2)
   return L.divIcon({
     className: 'community-progress-marker',
@@ -276,6 +283,24 @@ function buildCommunityProgressIcon(name: string, unitCount: number, avgProgress
   })
 }
 
+function buildCommunityBoundaryInfoIcon(name: string, avgProgress: number, unitCount: number, totalLengthM: number) {
+  const percent = Math.round(avgProgress * 100)
+  const length = Math.round(totalLengthM).toLocaleString('zh-CN')
+  return L.divIcon({
+    className: 'community-boundary-info',
+    html: `<div class="community-boundary-info-content">
+      <div class="community-boundary-info-name">${name}</div>
+      <div class="community-boundary-info-metrics">
+        <div class="community-boundary-info-row"><span>进度</span><span>：</span><span>${percent}%</span></div>
+        <div class="community-boundary-info-row"><span>单元</span><span>：</span><span>${unitCount} 个</span></div>
+        <div class="community-boundary-info-row"><span>管线</span><span>：</span><span>${length} 米</span></div>
+      </div>
+    </div>`,
+    iconSize: [220, 96],
+    iconAnchor: [110, 48],
+  })
+}
+
 // ============== 样式常量（顶层共享）==============
 const POLY_STYLE_DEFAULT = {
   color: '#67c23a', weight: 2, opacity: 0.9,
@@ -291,6 +316,14 @@ const POLY_STYLE_SELECTED = {
   color: '#7c3aed', weight: 3, opacity: 1,
   fillColor: '#7c3aed', fillOpacity: 0.28,
   dashArray: null,
+}
+const COMMUNITY_BOUNDARY_STYLE = {
+  color: '#2563eb',
+  weight: 2,
+  opacity: 0.9,
+  fillColor: '#60a5fa',
+  fillOpacity: 0.6,
+  dashArray: undefined,
 }
 
 function applyPolyStyle(poly: any, mode: 'default' | 'hover' | 'selected') {
@@ -793,6 +826,84 @@ function groupUnitsByCommunity(): Map<string, CorrosionUnit[]> {
   return groups
 }
 
+function applyCommunityBoundaryStyle(poly: any, color: string, active: boolean) {
+  poly.setStyle({
+    color,
+    weight: active ? 4 : COMMUNITY_BOUNDARY_STYLE.weight,
+    opacity: 1,
+    fillColor: color,
+    fillOpacity: active ? 0.8 : COMMUNITY_BOUNDARY_STYLE.fillOpacity,
+    dashArray: undefined,
+  })
+}
+
+function syncCommunityInfoVisibility() {
+  communityMarkerLayer?.eachLayer((layer: any) => {
+    if (layer.options?.icon?.options?.className !== 'community-boundary-info') return
+    layer.getElement()?.classList.toggle('community-info-hidden', !communityInfoVisible)
+  })
+}
+
+function renderCommunityBoundaries(groups: Map<string, CorrosionUnit[]>): Set<string> {
+  const boundaryNames = new Set<string>()
+  const boundaries = store.facilities?.communityBoundaries ?? []
+  boundaries.forEach((boundary) => {
+    const rings = boundary.rings
+      .map((ring) => ring.map(([lng, lat]) => [lat, lng] as [number, number]))
+      .filter((ring) => ring.length >= 3)
+    if (rings.length === 0) return
+
+    const units = groups.get(boundary.name) ?? []
+    const avg = avgProgress(units)
+    const hasException = units.some((u) => u.inspection_status === 'exception')
+    const color = communityProgressColor(avg, hasException)
+    const poly = L.polygon(rings, {
+      ...COMMUNITY_BOUNDARY_STYLE,
+      color,
+      fillColor: color,
+      interactive: true,
+      className: 'community-boundary',
+    })
+    // 使用实际边界的包围盒中心，避免 WKT 顶点分布不均导致平均坐标偏移。
+    const center = poly.getBounds().getCenter()
+    const totalLengthM = (store.facilities?.pipes ?? [])
+      .filter((pipe) => pipe.community === boundary.name)
+      .reduce((total, pipe) => total + (Number.parseFloat(pipe.length) || 0), 0)
+    const info = L.marker(center, {
+      icon: buildCommunityBoundaryInfoIcon(boundary.name, avg, units.length, totalLengthM),
+      interactive: true,
+      zIndexOffset: 520,
+    })
+    const setActive = (active: boolean) => {
+      applyCommunityBoundaryStyle(poly, color, active)
+      info.getElement()?.classList.toggle('hovered', active)
+    }
+    const focusCommunity = () => {
+      communityLayer?.removeLayer(poly)
+      communityMarkerLayer?.removeLayer(info)
+      if (map) map.flyTo(center, 18, { duration: 0.8, easeLinearity: 0.25 })
+      emit('community-focus', boundary.name)
+    }
+    poly.on('mouseover', () => setActive(true))
+    poly.on('mouseout', () => setActive(false))
+    poly.on('click', (e: any) => {
+      L.DomEvent.stopPropagation(e)
+      focusCommunity()
+    })
+    info.on('mouseover', () => setActive(true))
+    info.on('mouseout', () => setActive(false))
+    info.on('click', (e: any) => {
+      L.DomEvent.stopPropagation(e)
+      focusCommunity()
+    })
+    poly.addTo(communityLayer!)
+    poly.bringToBack()
+    info.addTo(communityMarkerLayer!)
+    boundaryNames.add(boundary.name)
+  })
+  return boundaryNames
+}
+
 /** 渲染小区概览图层（zoom < COMMUNITY_VIEW_ZOOM 时显示）
  *  - 只在每个小区中心放一个大进度圆圈（百分比 + 小区名 + 单元数）
  *  - 不画控制单元边界多边形，避免缩小后视觉过密
@@ -803,8 +914,10 @@ function renderCommunityLayers() {
   communityMarkerLayer.clearLayers()
 
   const groups = groupUnitsByCommunity()
+  const boundaryNames = renderCommunityBoundaries(groups)
   let index = 0
   for (const [name, units] of groups) {
+    if (boundaryNames.has(name)) continue
     // 计算小区中心（所有 unit polyline 顶点的平均）
     const allPts: [number, number][] = []
     units.forEach((u) => {
@@ -838,6 +951,7 @@ function renderCommunityLayers() {
     marker.addTo(communityMarkerLayer)
     index++
   }
+  syncCommunityInfoVisibility()
 }
 
 function avgProgress(units: CorrosionUnit[]): number {
@@ -855,6 +969,8 @@ function avgLatLng(pts: [number, number][]) {
 /** 切换到"小区概览"模式：隐藏细节图层，显示小区图层 */
 function showCommunityView() {
   isCommunityView = true
+  communityLayersHiddenForZoom = false
+  communityInfoVisible = true
   if (pendingCommunityRemoveTimer !== null) {
     clearTimeout(pendingCommunityRemoveTimer)
     pendingCommunityRemoveTimer = null
@@ -874,22 +990,19 @@ function showCommunityView() {
   renderCommunityLayers()
 }
 
-/** 切换到"细节视图"模式：显示细节图层，隐藏小区图层
- *  - 0ms 起：小区大圆渐隐（0.45s 过渡）+ 细节图层整体淡入
- *  - 关键：不要立即 remove 小区图层，DOM 必须在过渡跑完后才能移除
- */
+/** 切换到"细节视图"模式：立即隐藏小区图层并显示细节图层 */
 function showDetailView() {
   isCommunityView = false
+  communityLayersHiddenForZoom = false
 
-  // 1) 渐隐小区大圆（加 class，不立即 remove，让 CSS 过渡跑完）
-  if (communityMarkerLayer) {
-    communityMarkerLayer.eachLayer((mk: any) => {
-      const el = mk.getElement() as HTMLElement | null
-      if (el) el.classList.add('community-fading')
-    })
+  if (pendingCommunityRemoveTimer !== null) {
+    clearTimeout(pendingCommunityRemoveTimer)
+    pendingCommunityRemoveTimer = null
   }
+  communityLayer?.remove()
+  communityMarkerLayer?.remove()
 
-  // 2) 立即加细节图层(走 visibility 权威函数,被勾选掉的设施不会强显示)
+  // 立即加细节图层(走 visibility 权威函数,被勾选掉的设施不会强显示)
   //    animate=false:避免和细节视图整体渐现叠加
   applyFacilityVisibility({ animate: false })
   // facilityHighlightLayer 是空 layer,仅供 DOM 搬运用,无条件 addTo
@@ -904,22 +1017,36 @@ function showDetailView() {
     }, 260)
   }
 
-  // 6) 大圆渐隐完（0.45s + 30ms buffer）后再移除 DOM（这是之前漏掉的关键步骤）
-  if (pendingCommunityRemoveTimer !== null) clearTimeout(pendingCommunityRemoveTimer)
-  pendingCommunityRemoveTimer = setTimeout(() => {
+}
+
+function handleZoomStart() {
+  zoomAnimationStartLevel = map?.getZoom() ?? null
+}
+
+function handleZoomAnimation(e: { zoom: number }) {
+  const startZoom = zoomAnimationStartLevel ?? map?.getZoom() ?? e.zoom
+  if (isCommunityView && e.zoom < startZoom) {
+    communityInfoVisible = false
+    syncCommunityInfoVisibility()
+  } else if (isCommunityView && e.zoom > startZoom && e.zoom < COMMUNITY_VIEW_ZOOM) {
+    communityInfoVisible = true
+    syncCommunityInfoVisibility()
+  }
+  if (e.zoom >= COMMUNITY_VIEW_ZOOM && isCommunityView && !communityLayersHiddenForZoom) {
+    communityLayersHiddenForZoom = true
     communityLayer?.remove()
     communityMarkerLayer?.remove()
-    pendingCommunityRemoveTimer = null
-  }, 480)
+  }
 }
 
 /** 根据当前 zoom 决定显示模式 */
 function syncViewMode() {
   if (!map) return
   const z = map.getZoom()
+  zoomAnimationStartLevel = null
   if (z < COMMUNITY_VIEW_ZOOM) {
     if (store.selectedUnit) store.selectUnit(null)
-    if (!isCommunityView) {
+    if (!isCommunityView || communityLayersHiddenForZoom) {
       showCommunityView()
       emit('view-mode', 'community')  // 进入小区概览,通知父组件收起菜单
     }
@@ -942,6 +1069,9 @@ function fitToAll() {
   fac.regulators.forEach((r) => allLatLngs.push([r.lat, r.lng]))
   fac.inlets.forEach((i) => allLatLngs.push([i.lat, i.lng]))
   fac.pipes.forEach((p) => p.coords.forEach(([lng, lat]) => allLatLngs.push([lat, lng])))
+  fac.communityBoundaries.forEach((b) => b.rings.forEach((ring) => {
+    ring.forEach(([lng, lat]) => allLatLngs.push([lat, lng]))
+  }))
   if (allLatLngs.length > 0) {
     map.fitBounds(allLatLngs, { padding: [60, 60], maxZoom: 16 })
   }
@@ -1011,16 +1141,18 @@ onMounted(async () => {
   inletLayer = L.layerGroup().addTo(map)
   jointLayer = L.layerGroup().addTo(map)
   // 进度圆两个 layer 分别绑定上面创建的两个 pane
-  progressDefaultLayer = L.layerGroup({ pane: 'progressPaneDefault' }).addTo(map)
-  progressHighlightLayer = L.layerGroup({ pane: 'progressPaneHighlight' }).addTo(map)
+  progressDefaultLayer = L.layerGroup([], { pane: 'progressPaneDefault' } as any).addTo(map)
+  progressHighlightLayer = L.layerGroup([], { pane: 'progressPaneHighlight' } as any).addTo(map)
   // 设施高亮 layer(初始空,marker 选中时通过 DOM 操作直接搬到 pane,不进 layer)
-  facilityHighlightLayer = L.layerGroup({ pane: 'facilityHighlightPane' }).addTo(map)
+  facilityHighlightLayer = L.layerGroup([], { pane: 'facilityHighlightPane' } as any).addTo(map)
 
   // 小区概览图层（zoom < COMMUNITY_VIEW_ZOOM 时 addTo，否则保持 remove）
   communityLayer = L.layerGroup()
   communityMarkerLayer = L.layerGroup()
 
-  // 监听 zoomend：自动切换细节 / 小区概览模式
+  // 放大跨过小区层级时立即切层；zoomend 负责其余缩放状态同步。
+  map.on('zoomstart', handleZoomStart)
+  map.on('zoomanim', handleZoomAnimation)
   map.on('zoomend', syncViewMode)
   // 初始化时根据当前 zoom 决定
   syncViewMode()
@@ -1053,9 +1185,10 @@ watch(
   () => {
     // 只重画组合标签（性能考虑，不重新画所有图层）
     if (unitPolyLayer) {
+      const layer = unitPolyLayer
       const labels: any[] = []
-      unitPolyLayer.eachLayer((l: any) => { if (l.options?.icon?.options?.className === 'unit-combo-label') labels.push(l) })
-      labels.forEach((l) => unitPolyLayer.removeLayer(l))
+      layer.eachLayer((l: any) => { if (l.options?.icon?.options?.className === 'unit-combo-label') labels.push(l) })
+      labels.forEach((l) => layer.removeLayer(l))
       renderUnitPolygons()
     }
     // 如果当前是小区概览模式，重新画小区图层（进度更新）

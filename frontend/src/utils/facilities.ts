@@ -27,6 +27,7 @@ export interface CsvJoint {
 }
 
 export interface CsvPipe {
+  community: string
   fid: number
   coords: Array<[number, number]>
   pipeno: string
@@ -56,6 +57,24 @@ export interface CsvInlet {
   unit_id?: number
 }
 
+export interface CommunityBoundary {
+  name: string
+  rings: Array<Array<[number, number]>>
+  center: [number, number]
+}
+
+interface RawUnit {
+  community: string
+  fid: number
+  name: string
+  press: string
+  type: string
+  area: number
+  length: number
+  rings: Array<Array<[number, number]>>
+  center: [number, number]
+}
+
 // ============== 加载结果 ==============
 export interface FacilitiesData {
   units: CorrosionUnit[]
@@ -63,6 +82,7 @@ export interface FacilitiesData {
   pipes: CsvPipe[]
   regulators: CsvRegulator[]
   inlets: CsvInlet[]
+  communityBoundaries: CommunityBoundary[]
   jointCountByUnit: Record<number, number>
   inletCountByUnit: Record<number, number>
 }
@@ -89,14 +109,16 @@ const COMMUNITIES = [
  *    (之前用 Promise.all,一个社区失败整个加载崩溃,六里也跟着没数据)
  */
 async function loadCommunityData(community: string): Promise<{
-  rawUnits: ReturnType<typeof parseCSV> extends never ? never : any[]
+  community?: string
+  rawUnits: RawUnit[]
   joints: CsvJoint[]
   pipes: CsvPipe[]
   regulators: CsvRegulator[]
   inlets: CsvInlet[]
+  boundary?: CommunityBoundary
 }> {
   try {
-    const [jointsText, pipesText, regulatorsText, inletsText, unitsText] = await Promise.all([
+    const [jointsText, pipesText, regulatorsText, inletsText, unitsText, boundaryText] = await Promise.all([
       fetch(`${BASE}/${community}-绝缘接头.csv`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.text()
@@ -117,10 +139,13 @@ async function loadCommunityData(community: string): Promise<{
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.text()
       }),
+      fetch(`${BASE}/${community}-边界.csv`)
+        .then((r) => r.ok ? r.text() : '')
+        .catch(() => ''),
     ])
 
     // ============ 控制单元 ============
-    const rawUnits = parseCSV(unitsText)
+    const rawUnits: RawUnit[] = parseCSV(unitsText)
       .map((r) => {
         const rings = parseWKTPolygon(r.WKT)
         if (rings.length === 0) return null
@@ -147,12 +172,12 @@ async function loadCommunityData(community: string): Promise<{
       .map((r) => {
         const pt = parseWKTPoint(r.WKT)
         return pt
-          ? {
+          ? ({
               fid: parseInt(r.fid) || 0,
               lng: pt[0], lat: pt[1],
               ecode: r.ECODE || '', type: r.TYPE || '绝缘接头',
               pressured: r.PRESSURED || '', pipeno: r.PIPENO,
-            }
+            } as CsvJoint)
           : null
       })
       .filter((x): x is CsvJoint => !!x)
@@ -162,7 +187,7 @@ async function loadCommunityData(community: string): Promise<{
         const coords = parseWKTLine(r.WKT)
         return coords
           ? {
-              fid: parseInt(r.fid) || 0, coords,
+              community, fid: parseInt(r.fid) || 0, coords,
               pipeno: r.PIPENO || '', pressured: r.PRESSURED || '',
               material: r.MATERIAL || '', diametero: r.DIAMETERO || '',
               thickness: r.THICKNESS || '', length: r.LENGTH || '',
@@ -197,7 +222,17 @@ async function loadCommunityData(community: string): Promise<{
       })
       .filter((x): x is CsvInlet => !!x)
 
-    return { community, rawUnits, joints, pipes, regulators, inlets }
+    const boundaryRow = boundaryText ? parseCSV(boundaryText)[0] : undefined
+    const boundaryRings = boundaryRow ? parseWKTPolygon(boundaryRow.WKT) : []
+    const boundary = boundaryRings.length > 0
+      ? {
+          name: community,
+          rings: boundaryRings,
+          center: polygonCenter(boundaryRings[0]),
+        }
+      : undefined
+
+    return { community, rawUnits, joints, pipes, regulators, inlets, boundary }
   } catch (err) {
     console.warn(`[Facilities] 跳过小区 ${community}(加载失败):`, err)
     return { rawUnits: [], joints: [], pipes: [], regulators: [], inlets: [] }
@@ -332,6 +367,7 @@ export async function loadFacilities(): Promise<FacilitiesData> {
   const pipes = communities.flatMap((c) => c.pipes)
   const regulators = communities.flatMap((c) => c.regulators)
   const inlets = communities.flatMap((c) => c.inlets)
+  const communityBoundaries = communities.flatMap((c) => c.boundary ? [c.boundary] : [])
 
   // ============ 控制单元(全局唯一 ID,跨小区不冲突)============
   const units: CorrosionUnit[] = rawUnits.map((u, idx) => ({
@@ -417,6 +453,7 @@ export async function loadFacilities(): Promise<FacilitiesData> {
     pipes,
     regulators,
     inlets,
+    communityBoundaries,
     jointCountByUnit,
     inletCountByUnit,
   }

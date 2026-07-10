@@ -144,9 +144,9 @@ const communityActive = ref<string>('')
  */
 const lastFocusedCommunity = ref<string>('')
 const COMMUNITY_ZOOM_DURATION_MS = 600
-let selectedUnitScrollTimer: ReturnType<typeof window.setTimeout> | null = null
-let communityZoomScrollTimer: ReturnType<typeof window.setTimeout> | null = null
-let focusedCommunityScrollTimer: ReturnType<typeof window.setTimeout> | null = null
+let selectedUnitScrollTimer: number | null = null
+let communityZoomScrollTimer: number | null = null
+let focusedCommunityScrollTimer: number | null = null
 
 function clearSidebarTimers() {
   if (selectedUnitScrollTimer !== null) {
@@ -308,6 +308,12 @@ onBeforeUnmount(() => {
 
 const selectedUnit = computed(() => store.selectedUnit)
 
+function unitCenterText(unit: CorrosionUnit): string {
+  return unit.lng !== undefined && unit.lat !== undefined
+    ? `${unit.lng.toFixed(6)}, ${unit.lat.toFixed(6)}`
+    : '—'
+}
+
 const tabItems = computed(() =>
   store.items.map((it) => ({
     code: it.code,
@@ -363,7 +369,7 @@ const tabItems = computed(() =>
                 :show-text="true"
                 :status="c.hasException ? 'exception' : ''"
                 :color="communityProgressColor"
-                :format="(p) => `${p}%`"
+                :format="(p: number) => `${p}%`"
                 class="community-progress"
               />
               <span class="meta">{{ c.units.length }} 个单元</span>
@@ -446,7 +452,7 @@ const tabItems = computed(() =>
           <el-descriptions-item label="状态">
             <StatusTag :status="selectedUnit.inspection_status" />
           </el-descriptions-item>
-          <el-descriptions-item label="中心坐标">{{ selectedUnit.lng.toFixed(6) }}, {{ selectedUnit.lat.toFixed(6) }}</el-descriptions-item>
+          <el-descriptions-item label="中心坐标">{{ unitCenterText(selectedUnit) }}</el-descriptions-item>
           <el-descriptions-item label="最近检测">{{ selectedUnit.last_inspection_at || '—' }}</el-descriptions-item>
         </el-descriptions>
 
@@ -478,7 +484,7 @@ const tabItems = computed(() =>
                 <StatusTag v-if="it.status !== 'pending'" :status="it.status" short />
               </span>
             </template>
-            <InspectionForm :unit-id="selectedUnit.id" :item="store.items[idx]" @saved="store.loadAll()" />
+            <InspectionForm :unit-id="selectedUnit.id" :item="store.items[idx]" />
           </el-tab-pane>
         </el-tabs>
       </div>

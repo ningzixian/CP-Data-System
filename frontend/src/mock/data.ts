@@ -88,7 +88,7 @@ const ITEM_CODES: InspectionItemCode[] = INSPECTION_ITEMS.map((i) => i.code)
  */
 const nhjyRecords: InspectionRecord[] = [
   {
-    id: 1001, unit_id: 1, point_id: null, item_code: 'PLAN_OUTLINE',
+    id: 1001, unit_id: 1, item_code: 'PLAN_OUTLINE',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'PLAN_OUTLINE')!.name,
     work_hours: 0.25, personnel_count: 1, personnel_level: '高级',
     inspector: '王工（高级工程师）',
@@ -99,7 +99,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: daysAgo(15), updated_at: daysAgo(15),
   },
   {
-    id: 1002, unit_id: 1, point_id: null, item_code: 'JOINT_VERIFY',
+    id: 1002, unit_id: 1, item_code: 'JOINT_VERIFY',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'JOINT_VERIFY')!.name,
     work_hours: 1.0, personnel_count: 2, personnel_level: '中级',
     inspector: '李工、张工',
@@ -112,7 +112,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: daysAgo(7), updated_at: daysAgo(7),
   },
   {
-    id: 1003, unit_id: 1, point_id: null, item_code: 'SOIL_RESISTIVITY',
+    id: 1003, unit_id: 1, item_code: 'SOIL_RESISTIVITY',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'SOIL_RESISTIVITY')!.name,
     work_hours: 0.3, personnel_count: 2, personnel_level: '中级',
     inspector: '李工、张工',
@@ -124,7 +124,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: daysAgo(5), updated_at: daysAgo(5),
   },
   {
-    id: 1004, unit_id: 1, point_id: null, item_code: 'DC_STRAY_CURRENT',
+    id: 1004, unit_id: 1, item_code: 'DC_STRAY_CURRENT',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'DC_STRAY_CURRENT')!.name,
     work_hours: 0.3, personnel_count: 2, personnel_level: '高级',
     inspector: '王工、刘工',
@@ -136,7 +136,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: daysAgo(4), updated_at: daysAgo(4),
   },
   {
-    id: 1005, unit_id: 1, point_id: null, item_code: 'COATING_DETECT',
+    id: 1005, unit_id: 1, item_code: 'COATING_DETECT',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'COATING_DETECT')!.name,
     work_hours: 0.5, personnel_count: 2, personnel_level: '高级',
     inspector: '王工、赵工',
@@ -152,7 +152,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: hoursAgo(2), updated_at: hoursAgo(2),
   },
   {
-    id: 1006, unit_id: 1, point_id: null, item_code: 'PIPE_GROUND_POTENTIAL',
+    id: 1006, unit_id: 1, item_code: 'PIPE_GROUND_POTENTIAL',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'PIPE_GROUND_POTENTIAL')!.name,
     work_hours: 0.45, personnel_count: 2, personnel_level: '高级',
     inspector: '王工、赵工',
@@ -164,7 +164,7 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: hoursAgo(6), updated_at: hoursAgo(6),
   },
   {
-    id: 1007, unit_id: 1, point_id: null, item_code: 'ELECTRIC_CONTINUITY',
+    id: 1007, unit_id: 1, item_code: 'ELECTRIC_CONTINUITY',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'ELECTRIC_CONTINUITY')!.name,
     work_hours: 1.0, personnel_count: 2, personnel_level: '中级',
     inspector: '李工、刘工',
@@ -176,12 +176,12 @@ const nhjyRecords: InspectionRecord[] = [
     created_at: hoursAgo(8), updated_at: hoursAgo(8),
   },
   {
-    id: 1008, unit_id: 1, point_id: null, item_code: 'INLET_PARAM',
+    id: 1008, unit_id: 1, item_code: 'INLET_PARAM',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'INLET_PARAM')!.name,
     work_hours: 0.5, personnel_count: 2, personnel_level: '中级',
     inspector: '李工、张工',
     inspection_date: hoursAgo(12),
-    status: 'in_progress',
+    status: 'passed',
     result_summary: '已测 1 个引入口：DN300、壁厚 9.8mm，不圆度 0.3%；计划继续测剩余引入口',
     result_data: { diameter: 300, out_of_roundness: 0.3, wall_thickness: 9.8 },
     measured_value: 9.8, unit: 'mm',
@@ -209,7 +209,6 @@ function makeDemoRecords(unitId: number, idBase: number, statuses: RecordStatus[
     return {
       id: idBase + idx,
       unit_id: unitId,
-      point_id: null,
       item_code: code,
       item_name: item.name,
       work_hours: 0.25,
@@ -220,11 +219,9 @@ function makeDemoRecords(unitId: number, idBase: number, statuses: RecordStatus[
       status,
       result_summary: status === 'exception' ? '检测发现异常' : (isDone ? '检测合格' : ''),
       result_data: {},
-      measured_value: null,
-      unit: item.pricePerKm ? undefined : undefined,
       created_at: daysAgo(7 - idx),
       updated_at: daysAgo(7 - idx),
-    } as InspectionRecord
+    }
   }).filter((r) => r.status !== 'pending')  // pending 不写入 mock，节省空间
 }
 
@@ -240,21 +237,81 @@ const demoRecords: InspectionRecord[] = [
   ...makeDemoRecords(5, 5000, ['exception','pending','pending','pending','pending','pending','pending','pending','pending']),
 ]
 
+const allPassedStatuses: RecordStatus[] = ITEM_CODES_LIST.map(() => 'passed')
+const sixLiRecords: InspectionRecord[] = Array.from({ length: 10 }, (_, index) => {
+  const unitId = 16 + index
+  return makeDemoRecords(unitId, 6000 + index * 10, allPassedStatuses)
+}).flat()
+
 export const MOCK_RECORDS: InspectionRecord[] = [
   ...nhjyRecords,
   ...demoRecords,
+  ...sixLiRecords,
 ]
+
+const MOCK_RECORDS_STORAGE_KEY = 'cp-data-system:mock-records'
+const MOCK_RECORDS_STORAGE_VERSION = 2
+
+interface PersistedMockRecords {
+  version: number
+  records: InspectionRecord[]
+}
+
+function recordKey(record: InspectionRecord): string {
+  return `${record.unit_id}:${record.item_code}`
+}
+
+function loadPersistedRecords(): InspectionRecord[] | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.localStorage.getItem(MOCK_RECORDS_STORAGE_KEY)
+    if (!value) return null
+    const parsed = JSON.parse(value) as InspectionRecord[] | PersistedMockRecords
+    if (!Array.isArray(parsed)) {
+      return parsed.version === MOCK_RECORDS_STORAGE_VERSION && Array.isArray(parsed.records)
+        ? parsed.records
+        : null
+    }
+
+    // v1 保存的是裸数组。迁移时保留已有编辑，但按本次测试要求将六里单元统一设为合格。
+    const persistedByKey = new Map(parsed.map((record) => [recordKey(record), record]))
+    const baselineKeys = new Set(MOCK_RECORDS.map(recordKey))
+    const migrated = MOCK_RECORDS.map((record) => {
+      return record.unit_id >= 16 && record.unit_id <= 25
+        ? record
+        : (persistedByKey.get(recordKey(record)) ?? record)
+    })
+    parsed.forEach((record) => {
+      if (!baselineKeys.has(recordKey(record))) migrated.push(record)
+    })
+    window.localStorage.setItem(MOCK_RECORDS_STORAGE_KEY, JSON.stringify({
+      version: MOCK_RECORDS_STORAGE_VERSION,
+      records: migrated,
+    }))
+    return migrated
+  } catch {
+    return null
+  }
+}
 
 // 内存里可写的副本（mock 模式下，新建的记录会追加到这份数据上）
 export const mockStore = {
   pipelines: [...MOCK_PIPELINES],
   units: [...MOCK_UNITS],
   points: [...MOCK_POINTS],
-  records: [...MOCK_RECORDS],
+  records: loadPersistedRecords() ?? [...MOCK_RECORDS],
   nextId: 1000,
 }
 
 mockStore.nextId = Math.max(...mockStore.records.map((r) => r.id), ...mockStore.units.map((u) => u.id)) + 1
+
+export function persistMockRecords() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(MOCK_RECORDS_STORAGE_KEY, JSON.stringify({
+    version: MOCK_RECORDS_STORAGE_VERSION,
+    records: mockStore.records,
+  }))
+}
 
 // ============== 工具函数 ==============
 function computeUnitProgress(unitId: number): { progress: number; status: CorrosionUnit['inspection_status'] } {

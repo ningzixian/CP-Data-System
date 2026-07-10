@@ -4,7 +4,7 @@
  */
 import type { AxiosRequestConfig } from 'axios'
 import {
-  mockStore, buildDashboard, computeUnitProgress,
+  mockStore, buildDashboard, computeUnitProgress, persistMockRecords,
 } from './data'
 import { INSPECTION_ITEMS } from '@/types/items'
 
@@ -84,6 +84,7 @@ export async function mockAdapter(config: AxiosRequestConfig): Promise<any> {
     if (method.toUpperCase() === 'DELETE') {
       mockStore.units.splice(idx, 1)
       mockStore.records = mockStore.records.filter((r) => r.unit_id !== id)
+      persistMockRecords()
       return delay(ok({ ok: true }))
     }
   }
@@ -122,6 +123,7 @@ export async function mockAdapter(config: AxiosRequestConfig): Promise<any> {
     }
     mockStore.records.push(obj)
     refreshUnit(obj.unit_id)
+    persistMockRecords()
     return delay(ok(obj))
   }
   const recordMatch = path.match(/^\/api\/records\/(\d+)$/)
@@ -136,12 +138,14 @@ export async function mockAdapter(config: AxiosRequestConfig): Promise<any> {
         updated_at: new Date().toISOString(),
       }
       refreshUnit(mockStore.records[idx].unit_id)
+      persistMockRecords()
       return delay(ok(mockStore.records[idx]))
     }
     if (method.toUpperCase() === 'DELETE') {
       const uid = mockStore.records[idx].unit_id
       mockStore.records.splice(idx, 1)
       refreshUnit(uid)
+      persistMockRecords()
       return delay(ok({ ok: true }))
     }
   }

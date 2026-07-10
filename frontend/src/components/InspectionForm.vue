@@ -64,7 +64,7 @@ async function save() {
       await recordsApi.create(payload)
     }
     ElMessage.success('保存成功')
-    await store.loadAll()
+    await store.refreshRecords()
     emit('saved')
     await load()
   } catch (e: any) {

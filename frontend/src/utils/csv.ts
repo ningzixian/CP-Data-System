@@ -71,17 +71,19 @@ export function parseWKTLine(wkt: string): Array<[number, number]> | null {
 }
 
 /**
- * 解析 MULTIPOLYGON (((lng lat, lng lat, ...)), ((lng lat, ...)), ...)
+ * 解析 POLYGON / MULTIPOLYGON。
  * 返回多个 ring（外环 + 内环/hole）。每个 ring 是 [[lng, lat], ...]
  */
 export function parseWKTPolygon(wkt: string): Array<Array<[number, number]>> {
   if (!wkt) return []
-  const m = wkt.match(/MULTIPOLYGON\s*\((.*)\)\s*$/is)
-  if (!m) return []
+  const polygon = wkt.match(/POLYGON\s*\((.*)\)\s*$/is)
+  const multiPolygon = wkt.match(/MULTIPOLYGON\s*\((.*)\)\s*$/is)
+  const body = multiPolygon?.[1] ?? polygon?.[1]
+  if (!body) return []
   const rings: Array<Array<[number, number]>> = []
-  const ringRe = /\(\(\s*([^\(\)]+?)\s*\)\)/g
+  const ringRe = multiPolygon ? /\(\(\s*([^\(\)]+?)\s*\)\)/g : /\(\s*([^\(\)]+?)\s*\)/g
   let r
-  while ((r = ringRe.exec(m[1])) !== null) {
+  while ((r = ringRe.exec(body)) !== null) {
     const coords = r[1]
       .split(',')
       .map((pair) => {
