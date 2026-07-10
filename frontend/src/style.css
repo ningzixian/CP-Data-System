@@ -207,6 +207,420 @@ html, body, #app {
   border-bottom: 1px solid #ebeef5;
 }
 
+/* SurveyPage 侧栏顶部菜单栏:小区名 + 右侧元信息(同行) */
+.survey-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
+}
+.survey-header .survey-header-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  flex-shrink: 0;
+}
+.survey-header .survey-header-meta {
+  font-size: 12px;
+  color: #909399;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* SurveyPage 工具栏:模式切换 + 撤销/重做 */
+.survey-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ebeef5;
+}
+.survey-toolbar-row {
+  display: flex;
+  gap: 6px;
+}
+.survey-tool-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #f5f7fa;
+  color: #606266;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.survey-tool-btn:hover:not(:disabled) {
+  border-color: #409eff;
+  color: #409eff;
+}
+.survey-tool-btn.active {
+  background: #409eff;
+  color: #fff;
+  border-color: #409eff;
+}
+.survey-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* SurveyPage 侧栏底部:点位列表 */
+.survey-list {
+  border-top: 1px solid #ebeef5;
+}
+.survey-list-header {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #909399;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+  font-weight: 600;
+}
+.survey-point-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f5f7fa;
+  transition: background 0.15s;
+}
+.survey-point-row:hover {
+  background: #f5f7fa;
+}
+.survey-point-row.active {
+  background: #ecf5ff;
+}
+.survey-point-type-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.survey-point-type-dot.type-tee {
+  background: #303133;  /* T 形黑色 */
+  border-radius: 0;
+  transform: rotate(45deg);
+}
+.survey-point-type-dot.type-elbow {
+  background: #303133;
+  border-radius: 0;
+}
+.survey-point-type-dot.type-straight {
+  background: #e6a23c;  /* 默认 source=csv:橙色 */
+}
+.survey-point-type-dot.type-straight.source-manual {
+  background: #409eff;  /* source=manual:蓝色 */
+}
+.survey-point-id {
+  font-weight: 600;
+  color: #303133;
+  flex-shrink: 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.survey-point-type {
+  color: #909399;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ============ Survey Map:外层 wrapper ============ */
+/* 包住 #map 和编辑浮层,继承父容器 .map-panel 的全部空间
+ *  - 必须 width/height: 100% 撑满,否则 #map 拿不到高度
+ *  - 必须 position: relative,编辑浮层 absolute 定位才有参照
+ */
+.survey-map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* ============ Survey Map:模式光标 ============ */
+/* add-point 模式时,地图区域鼠标变 crosshair,提示用户"点击加点位"
+ *  - class 加在 .survey-map-wrapper 上(.leaflet-container 在它的子元素 #map 上)
+ *  - 用后代选择器而不是 .leaflet-container.mode-add-point
+ */
+.mode-add-point .leaflet-container,
+.mode-add-point .leaflet-container .leaflet-grab,
+.mode-add-point .leaflet-container .leaflet-interactive {
+  cursor: crosshair !important;
+}
+.mode-add-point .leaflet-container .leaflet-grab:hover {
+  cursor: crosshair !important;
+}
+
+/* connect 模式:同样 crosshair,因为只有点中点位/引入口才生效
+ *  - 空白处点击不响应(找不到 snap 目标),但视觉上提示"瞄准端点"
+ *  - 拖拽中(按住)显示 grabbing
+ */
+.mode-connect .leaflet-container,
+.mode-connect .leaflet-container .leaflet-grab,
+.mode-connect .leaflet-container .leaflet-interactive {
+  cursor: crosshair !important;
+}
+.mode-connect.is-dragging .leaflet-container,
+.mode-connect.is-dragging .leaflet-container .leaflet-grab {
+  cursor: grabbing !important;
+}
+
+/* view 模式:拖动点位时光标(已禁用,占位) */
+
+/* ============ Survey Map:add-point 三选菜单 popup ============ */
+.survey-add-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+  min-width: 160px;
+}
+.survey-add-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: #fff;
+}
+.survey-add-menu-title {
+  font-size: 12px;
+  color: #909399;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid #ebeef5;
+  margin-bottom: 4px;
+}
+.survey-add-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #303133;
+  transition: background 0.15s;
+}
+.survey-add-menu-btn:hover {
+  background: #ecf5ff;
+  color: #409eff;
+}
+.survey-add-menu-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-block;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.survey-add-menu-icon.type-tee {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><line x1='14' y1='3' x2='14' y2='14' stroke='%23303133' stroke-width='3'/><line x1='14' y1='14' x2='14' y2='25' stroke='%23303133' stroke-width='3'/><line x1='14' y1='14' x2='25' y2='14' stroke='%23303133' stroke-width='3'/><circle cx='14' cy='14' r='3.5' fill='%23fff' stroke='%23303133' stroke-width='2'/></svg>");
+}
+.survey-add-menu-icon.type-elbow {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><line x1='14' y1='3' x2='14' y2='14' stroke='%23303133' stroke-width='3'/><line x1='14' y1='14' x2='25' y2='14' stroke='%23303133' stroke-width='3'/><circle cx='14' cy='14' r='3.5' fill='%23fff' stroke='%23303133' stroke-width='2'/></svg>");
+}
+.survey-add-menu-icon.type-straight {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><circle cx='14' cy='14' r='5' fill='%23e6a23c' stroke='%23fff' stroke-width='2'/></svg>");
+}
+
+/* ============ Survey Map:编辑浮层(右侧滑入) ============ */
+.survey-editor-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  max-height: calc(100% - 40px);
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13px;
+}
+.survey-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
+  font-weight: 600;
+}
+.survey-editor-id {
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: #303133;
+}
+.survey-editor-close {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: #909399;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.survey-editor-close:hover {
+  background: #ebeef5;
+  color: #303133;
+}
+.survey-editor-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.survey-editor-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.survey-editor-label {
+  font-size: 12px;
+  color: #909399;
+}
+.survey-editor-hint {
+  font-size: 11px;
+  color: #c0c4cc;
+  margin-top: 2px;
+}
+.survey-editor-coords {
+  font-size: 11px;
+  color: #909399;
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: #fafafa;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #ebeef5;
+  line-height: 1.6;
+}
+
+/* 旋转角度:滑块 + 数字 + 快捷按钮 */
+.survey-rotation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.survey-rotation-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: #409eff;
+  min-width: 50px;
+  text-align: right;
+  font-family: 'Consolas', 'Monaco', monospace;
+  flex-shrink: 0;
+}
+.survey-rotation-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.survey-rotation-preset {
+  padding: 5px 0;
+  font-size: 12px;
+  background: #f5f7fa;
+  color: #606266;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Consolas', 'Monaco', monospace;
+  transition: all 0.15s;
+}
+.survey-rotation-preset:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+.survey-rotation-preset.active {
+  background: #409eff;
+  color: #fff;
+  border-color: #409eff;
+}
+.survey-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #fafafa;
+  border-top: 1px solid #ebeef5;
+}
+
+/* ============ Survey Map:管线点击弹菜单(删除选项) ============ */
+.survey-line-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+  min-width: 200px;
+}
+.survey-line-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: #fff;
+}
+.survey-line-menu-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  padding: 4px 8px 2px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.survey-line-menu-meta {
+  font-size: 11px;
+  color: #909399;
+  padding: 0 8px 8px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  border-bottom: 1px solid #ebeef5;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.survey-line-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #303133;
+  transition: background 0.15s;
+  text-align: left;
+  width: 100%;
+}
+.survey-line-menu-btn:hover {
+  background: #fef0f0;
+}
+.survey-line-menu-btn.danger {
+  color: #f56c6c;
+}
+.survey-line-menu-btn.danger:hover {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+.survey-line-menu-btn .icon {
+  font-size: 13px;
+}
+
+/* 编辑浮层入场动效(右侧滑入) */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(20px);
+  opacity: 0;
+}
+
 .stats-bar .stat-item {
   flex: 1;
   text-align: center;

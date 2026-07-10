@@ -22,6 +22,9 @@ onMounted(async () => {
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'map' }" @click="router.push('/map')">
       地图视图
     </div>
+    <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'survey' }" @click="router.push('/survey')">
+      管线勘测
+    </div>
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'dashboard' }" @click="router.push('/dashboard')">
       进度看板
     </div>

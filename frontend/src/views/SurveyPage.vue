@@ -1,0 +1,252 @@
+<script setup lang="ts">
+/**
+ * 管线勘测页 — 独立板块
+ *
+ * Step 2:加点位(add-point 模式)+ 点位编辑
+ *  - 切到「+ 点位」模式,鼠标变 crosshair,点击地图弹三选菜单
+ *  - view 模式,点击点位 marker 打开编辑浮层(类型/角度/埋深/电流/备注/删除)
+ *  - 撤销/重做已就绪
+ */
+import { ref, computed, onMounted } from 'vue'
+import { useCpStore } from '@/stores/cp'
+import { useSurveyStore } from '@/stores/survey'
+import SurveyMapView from '@/components/SurveyMapView.vue'
+import type { SurveyPoint, SurveyPointType, SurveyEndpointId } from '@/types/survey'
+
+const store = useCpStore()
+const survey = useSurveyStore()
+
+// ========== 当前激活的小区 ==========
+const SURVEY_COMMUNITY = '南海家园三里'
+/** 现场打点 CSV 路径 */
+const SURVEY_CSV_URL = `${import.meta.env.BASE_URL}data/Pipe detection data/南海家园三里检测点坐标_20260710132027.csv`
+
+// ========== 数据筛选:只取南海家园三里 ==========
+const surveyPipes = computed(() => {
+  const allPipes = store.facilities?.pipes ?? []
+  return allPipes.filter((p) => p.community === SURVEY_COMMUNITY)
+})
+const surveyInlets = computed(() => {
+  const allInlets = store.facilities?.inlets ?? []
+  return allInlets.filter((i) => {
+    if (i.unit_id === undefined) return false
+    const unit = store.units.find((u) => u.id === i.unit_id)
+    return unit?.address?.startsWith(SURVEY_COMMUNITY) ?? false
+  })
+})
+const surveyUnits = computed(() =>
+  store.units.filter((u) => (u.address ?? '').startsWith(SURVEY_COMMUNITY)),
+)
+const surveyStats = computed(() => ({
+  unitCount: surveyUnits.value.length,
+  pipeCount: surveyPipes.value.length,
+  inletCount: surveyInlets.value.length,
+  pointCount: survey.points.length,
+  lineCount: survey.lines.length,
+}))
+
+// ========== 模式 / 编辑状态 ==========
+const mode = ref<'view' | 'add-point' | 'connect'>('view')
+/** 当前正在编辑的点位 id(传给 SurveyMapView 让它显示编辑浮层) */
+const editingPointId = ref<string | null>(null)
+/** 列表里选中的点位(高亮,不一定要编辑) */
+const selectedPointId = ref<string | null>(null)
+
+// ========== 工具栏回调 ==========
+function onUndo() { survey.undo() }
+function onRedo() { survey.redo() }
+
+function switchMode(next: typeof mode.value) {
+  // 切换模式时,关闭可能开着的编辑面板
+  if (editingPointId.value) editingPointId.value = null
+  mode.value = next
+}
+
+// ========== SurveyMapView 事件回调 ==========
+function onCreatePoint(payload: { lat: number; lng: number; type: SurveyPointType }) {
+  survey.addPoint({
+    lng: payload.lng,
+    lat: payload.lat,
+    type: payload.type,
+    rotation: 0,  // straight 强制 0,tee/elbow 用户编辑时再设
+  })
+  // 创建后保持在 add-point 模式,方便连续加点
+}
+
+function onPointClick(id: string) {
+  // view 模式点击 marker → 进入编辑
+  selectedPointId.value = id
+  editingPointId.value = id
+}
+
+function onUpdatePoint(payload: { id: string; patch: Partial<SurveyPoint> }) {
+  survey.updatePoint(payload.id, payload.patch)
+}
+function onDeletePoint(id: string) {
+  survey.removePoint(id)
+  if (selectedPointId.value === id) selectedPointId.value = null
+}
+function onCloseEditor() {
+  editingPointId.value = null
+}
+
+/** connect 模式拖拽完成 → 落地一条管线
+ *  - fromId/toId 是端点 ID,可能是 'point:xx' 或 'inlet:xx'
+ *  - store.addLine 内部会 push history + 防重复
+ */
+function onCreateLine(payload: { fromId: SurveyEndpointId; toId: SurveyEndpointId }) {
+  survey.addLine(payload)
+}
+
+/** 点击管线 → 弹菜单 → 用户点删除按钮才触发 */
+function onRemoveLine(id: string) {
+  survey.removeLine(id)
+}
+
+// ========== 图例显隐 ==========
+const pipeVisible = ref(true)
+const inletVisible = ref(true)
+const surveyPointVisible = ref(true)
+const surveyLineVisible = ref(true)
+
+// ========== 生命周期 ==========
+onMounted(async () => {
+  if (store.units.length === 0) {
+    await store.loadAll()
+  }
+  await survey.loadPointsFromCsv(SURVEY_CSV_URL)
+})
+</script>
+
+<template>
+  <div class="main-content">
+    <!-- 左侧菜单栏:小区名 + 工具栏 + 点位列表 -->
+    <div class="side-panel">
+      <div class="survey-header">
+        <div class="survey-header-name">{{ SURVEY_COMMUNITY }}</div>
+        <div class="survey-header-meta">
+          {{ surveyStats.unitCount }} 单元 ｜ {{ surveyStats.pipeCount }} 管线 ｜ {{ surveyStats.inletCount }} 引入
+        </div>
+      </div>
+
+      <!-- 工具栏:模式 + 撤销/重做 -->
+      <div class="survey-toolbar">
+        <div class="survey-toolbar-row">
+          <button
+            class="survey-tool-btn"
+            :class="{ active: mode === 'view' }"
+            @click="switchMode('view')"
+            title="查看模式"
+          >👁 查看</button>
+          <button
+            class="survey-tool-btn"
+            :class="{ active: mode === 'add-point' }"
+            @click="switchMode('add-point')"
+            title="点击地图添加点位"
+          >+ 点位</button>
+          <button
+            class="survey-tool-btn"
+            :class="{ active: mode === 'connect' }"
+            @click="switchMode('connect')"
+            title="点一个点位拖到另一个点位,松手生成管线"
+          >🔗 连线</button>
+        </div>
+        <div class="survey-toolbar-row">
+          <button
+            class="survey-tool-btn"
+            :class="{ disabled: !survey.canUndo }"
+            :disabled="!survey.canUndo"
+            @click="onUndo"
+            title="撤销"
+          >↶ 撤销</button>
+          <button
+            class="survey-tool-btn"
+            :class="{ disabled: !survey.canRedo }"
+            :disabled="!survey.canRedo"
+            @click="onRedo"
+            title="重做"
+          >↷ 重做</button>
+        </div>
+      </div>
+
+      <!-- 点位列表 -->
+      <div class="survey-list">
+        <div class="survey-list-header">
+          勘测点位（{{ survey.points.length }}）
+        </div>
+        <div v-if="survey.points.length === 0" class="empty-tip">
+          <div v-if="store.loading || !survey.points.length">正在加载 CSV...</div>
+          <div v-else>暂无点位</div>
+        </div>
+        <div
+          v-for="p in survey.points"
+          :key="p.id"
+          class="survey-point-row"
+          :class="{ active: selectedPointId === p.id }"
+          :data-point-id="p.id"
+          @click="onPointClick(p.id)"
+        >
+          <span
+            class="survey-point-type-dot"
+            :class="[`type-${p.type}`, `source-${p.source || 'csv'}`]"
+          ></span>
+          <span class="survey-point-id">{{ p.id }}</span>
+          <span class="survey-point-type">
+            {{ p.type === 'tee' ? '三通' : p.type === 'elbow' ? '弯头' : '普通' }}
+            <template v-if="p.type !== 'straight'">·{{ p.rotation }}°</template>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧:地图 + 左下角图例 -->
+    <div class="map-panel">
+      <SurveyMapView
+        :pipes="surveyPipes"
+        :inlets="surveyInlets"
+        :survey-points="survey.points"
+        :survey-lines="survey.lines"
+        :visible="pipeVisible"
+        :inlets-visible="inletVisible"
+        :survey-points-visible="surveyPointVisible"
+        :survey-lines-visible="surveyLineVisible"
+        :mode="mode"
+        :editing-point-id="editingPointId"
+        @create-point="onCreatePoint"
+        @point-click="onPointClick"
+        @update-point="onUpdatePoint"
+        @delete-point="onDeletePoint"
+        @close-editor="onCloseEditor"
+        @create-line="onCreateLine"
+        @remove-line="onRemoveLine"
+      />
+
+      <div class="map-legend">
+        <div class="legend-section legend-section--readonly">
+          <div><span class="dot" style="background:#67c23a"></span>燃气管线</div>
+          <div><span class="dot" style="background:#909399"></span>引入口</div>
+          <div><span class="dot" style="background:#f56c6c"></span>勘测管线</div>
+          <div><span class="dot" style="background:#e6a23c"></span>勘测点位</div>
+        </div>
+        <div class="legend-section legend-section--toggle">
+          <label class="legend-row" :class="{ 'is-off': !pipeVisible }">
+            <input type="checkbox" v-model="pipeVisible" />
+            <span class="legend-label">燃气管线（{{ surveyStats.pipeCount }}）</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !inletVisible }">
+            <input type="checkbox" v-model="inletVisible" />
+            <span class="legend-label">引入口（{{ surveyStats.inletCount }}）</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !surveyPointVisible }">
+            <input type="checkbox" v-model="surveyPointVisible" />
+            <span class="legend-label">勘测点位（{{ surveyStats.pointCount }}）</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !surveyLineVisible }">
+            <input type="checkbox" v-model="surveyLineVisible" />
+            <span class="legend-label">勘测管线（{{ surveyStats.lineCount }}）</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
