@@ -699,6 +699,43 @@ html, body, #app {
   justify-content: center !important;
 }
 
+.unit-progress-core {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--progress-border, #fff);
+  border-radius: 50%;
+  background-color: var(--progress-fill, #909399);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  transform: scale(1);
+  transform-origin: center;
+  will-change: transform;
+  transition:
+    transform 0.25s ease,
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.unit-progress-marker.is-hovered .unit-progress-core,
+.unit-progress-marker.is-selected .unit-progress-core {
+  transform: scale(1.24);
+}
+
+.unit-progress-marker.is-hovered .unit-progress-core {
+  box-shadow: 0 4px 14px rgba(64, 158, 255, 0.48);
+}
+
+.unit-progress-marker.is-selected .unit-progress-core {
+  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.58);
+}
+
 /* AMap 主地图覆盖物：复用原有图标视觉。 */
 .amap-marker-content .unit-progress-marker,
 .amap-marker-content .amap-facility-marker,

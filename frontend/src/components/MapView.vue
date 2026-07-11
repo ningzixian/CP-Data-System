@@ -41,6 +41,7 @@ const unitPolygons = new Map<number, any>()
 const unitMarkers = new Map<number, any>()
 
 const COMMUNITY_VIEW_ZOOM = 17
+const COMMUNITY_INFO_MIN_ZOOM = 16
 const DETAIL_ZOOM = 19
 const MAX_ZOOM = 20
 
@@ -75,13 +76,9 @@ function marker(options: { position: [number, number]; className: string; html: 
   return item
 }
 
-function progressHtml(unit: CorrosionUnit, mode: 'default' | 'hover' | 'selected' = 'default') {
-  const selected = mode === 'selected'
-  const size = mode === 'default' ? 50 : 62
-  const fontSize = mode === 'default' ? 14 : 18
-  const fill = selected ? '#409eff' : (STATUS_COLORS[unit.inspection_status] || '#909399')
-  const border = selected ? '#fdd835' : '#fff'
-  return `<div style="background:${fill};color:#fff;border-radius:50%;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;border:2px solid ${border};box-shadow:0 2px 8px rgba(0,0,0,.35);font-weight:600;font-size:${fontSize}px;font-family:-apple-system,sans-serif;transition:all .25s ease">${Math.round(unit.inspection_progress * 100)}%</div>`
+function progressHtml(unit: CorrosionUnit) {
+  const fill = STATUS_COLORS[unit.inspection_status] || '#909399'
+  return `<div class="unit-progress-core" style="--progress-fill:${fill};--progress-border:#fff"><span class="unit-progress-value">${Math.round(unit.inspection_progress * 100)}%</span></div>`
 }
 
 function communityColor(progress: number, exception = false) {
@@ -186,7 +183,17 @@ function setUnitStyle(id: number, mode: 'default' | 'hover' | 'selected') {
   if (polygon) polygon.setOptions(POLY_STYLES[mode])
   if (progress && unit) {
     const element = (progress as any).__content as HTMLElement
-    element.innerHTML = progressHtml(unit, mode)
+    const core = element.querySelector<HTMLElement>('.unit-progress-core')
+    const value = element.querySelector<HTMLElement>('.unit-progress-value')
+    element.classList.toggle('is-hovered', mode === 'hover')
+    element.classList.toggle('is-selected', mode === 'selected')
+    core?.style.setProperty('--progress-fill', mode === 'hover'
+      ? '#79bbff'
+      : mode === 'selected'
+        ? '#409eff'
+        : (STATUS_COLORS[unit.inspection_status] || '#909399'))
+    core?.style.setProperty('--progress-border', mode === 'selected' ? '#fdd835' : '#fff')
+    if (value) value.textContent = `${Math.round(unit.inspection_progress * 100)}%`
     progress.setzIndex(mode === 'default' ? 200 : 800)
   }
 }
@@ -284,6 +291,23 @@ function averageProgress(units: CorrosionUnit[]) {
   return units.length ? units.reduce((sum, unit) => sum + (unit.inspection_progress || 0), 0) / units.length : 0
 }
 
+/** 使用可见几何范围的包围盒中心，避免顶点数量不均造成算术平均中心偏移。 */
+function boundsCenter(points: Array<[number, number]>): [number, number] | null {
+  const valid = points.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
+  if (!valid.length) return null
+  let minLng = Infinity
+  let maxLng = -Infinity
+  let minLat = Infinity
+  let maxLat = -Infinity
+  valid.forEach(([lng, lat]) => {
+    minLng = Math.min(minLng, lng)
+    maxLng = Math.max(maxLng, lng)
+    minLat = Math.min(minLat, lat)
+    maxLat = Math.max(maxLat, lat)
+  })
+  return [(minLng + maxLng) / 2, (minLat + maxLat) / 2]
+}
+
 function focusCommunity(name: string, position: [number, number]) {
   map.setZoomAndCenter(18, position, false, 800)
   emit('community-focus', name)
@@ -302,7 +326,7 @@ function renderCommunities() {
     const color = communityColor(progress, exception)
     const path = boundary.rings.filter((ring) => ring.length >= 3)
     const polygon = new AMapApi.Polygon({ path, strokeColor: color, strokeWeight: 2, strokeOpacity: 1, fillColor: color, fillOpacity: 0.6, zIndex: 100, bubble: false })
-    const center: [number, number] = boundary.center
+    const center = boundsCenter(path.flat()) ?? boundary.center
     const length = (store.facilities?.pipes ?? []).filter((pipe) => pipe.community === boundary.name).reduce((sum, pipe) => sum + (Number.parseFloat(pipe.length) || 0), 0)
     const info = marker({ position: center, className: 'community-boundary-info', html: boundaryInfoHtml(boundary.name, progress, units.length, length), size: [220, 96], zIndex: 610 })
     const active = (value: boolean) => {
@@ -323,13 +347,32 @@ function renderCommunities() {
   let index = 0
   groups.forEach((units, name) => {
     if (rendered.has(name)) return
-    const positions = units.filter((unit) => unit.lng && unit.lat).map((unit) => [unit.lng!, unit.lat!] as [number, number])
+    const positions: Array<[number, number]> = []
+    units.forEach((unit) => {
+      if (unit.polyline && unit.polyline.length >= 3) {
+        unit.polyline.forEach(([lat, lng]) => positions.push([lng, lat]))
+      } else if (unit.lng && unit.lat) {
+        positions.push([unit.lng, unit.lat])
+      }
+    })
     if (!positions.length) return
-    const center: [number, number] = [positions.reduce((sum, point) => sum + point[0], 0) / positions.length, positions.reduce((sum, point) => sum + point[1], 0) / positions.length]
+    const center = boundsCenter(positions)
+    if (!center) return
     const progress = averageProgress(units)
     const item = marker({ position: center, className: 'community-progress-marker', html: communityHtml(name, units.length, progress, units.some((unit) => unit.inspection_status === 'exception'), index++), size: [130, 130], zIndex: 600 })
     item.on('click', () => focusCommunity(name, center))
     add('community', item)
+  })
+}
+
+/** 三里边界文字仅在初始化层级及以上显示，继续缩小时隐藏以避免画面拥挤。 */
+function syncCommunityInfoVisibility() {
+  if (!map) return
+  const visible = isCommunityView && map.getZoom() >= COMMUNITY_INFO_MIN_ZOOM
+  overlays.community.forEach((overlay) => {
+    const content = (overlay as any).__content as HTMLElement | undefined
+    if (!content?.classList.contains('community-boundary-info')) return
+    visible ? overlay.show() : overlay.hide()
   })
 }
 
@@ -338,10 +381,16 @@ function applyVisibility() {
   if (isCommunityView) {
     setShown('community', true)
     ;(['unit', 'pipe', 'joint', 'regulator', 'inlet'] as FacilityKey[]).forEach((kind) => setShown(kind, false))
+    syncCommunityInfoVisibility()
     return
   }
   setShown('community', false)
   ;(['unit', 'pipe', 'joint', 'regulator', 'inlet'] as FacilityKey[]).forEach((kind) => setShown(kind, props.visibility[kind]))
+}
+
+function handleZoomEnd() {
+  syncViewMode()
+  syncCommunityInfoVisibility()
 }
 
 function syncViewMode() {
@@ -402,7 +451,7 @@ onMounted(async () => {
     map.addControl(new AMapApi.Scale())
     map.addControl(new AMapApi.ToolBar({ position: 'RT' }))
     map.on('click', clearAll)
-    map.on('zoomend', syncViewMode)
+    map.on('zoomend', handleZoomEnd)
     isCommunityView = map.getZoom() < COMMUNITY_VIEW_ZOOM
     renderAll()
   } catch (error) {

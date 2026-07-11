@@ -57,6 +57,12 @@ function contentElement(className: string, html: string) {
 
 function createMarker(position: [number, number], className: string, html: string, zIndex: number, clickable = true) {
   const content = contentElement(className, html)
+  // AMap 自定义 Marker 的按下事件会继续落到地图画布，短点击可能让地图残留在拖拽状态。
+  // 只拦截拖拽起始事件，click 仍交给 Marker 的 AMap 事件处理。
+  const stopMapDrag = (event: Event) => event.stopPropagation()
+  content.addEventListener('pointerdown', stopMapDrag)
+  content.addEventListener('mousedown', stopMapDrag)
+  content.addEventListener('touchstart', stopMapDrag, { passive: true })
   const item = new AMapApi.Marker({ position, content, anchor: 'center', zIndex, clickable, bubble: false })
   ;(item as any).__content = content
   return item
@@ -105,6 +111,10 @@ function bindTip(overlay: any, html: string) {
     if (pos) openTip([pos.getLng(), pos.getLat()], html)
   })
   overlay.on('mouseout', () => tipWindow?.close())
+}
+
+function restoreMapDrag() {
+  map?.setStatus?.({ dragEnable: true })
 }
 
 function resolveEndpoint(id: SurveyEndpointId): [number, number] | null {
@@ -165,8 +175,8 @@ function renderInlets() {
   clearLayer('inlet')
   props.inlets.forEach((inlet) => {
     const item = createMarker([inlet.lng, inlet.lat], 'survey-inlet-marker', '<div style="background:#909399;color:#fff;border-radius:50%;width:14px;height:14px;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>', 420)
-    item.on('click', (event: any) => {
-      event.originEvent?.stopPropagation?.()
+    ;((item as any).__content as HTMLElement).addEventListener('click', (event) => {
+      event.stopPropagation()
       handleEndpointClick(`inlet:${inlet.fid}`, [inlet.lng, inlet.lat])
     })
     bindTip(item, `<b>引入口 ${inlet.ecode}</b><br>压力：${inlet.pressured || '—'}<br>管号：${inlet.pipeno || '—'}`)
@@ -181,8 +191,8 @@ function renderSurveyPoints() {
   pointMarkerMap.clear()
   props.surveyPoints.forEach((point) => {
     const item = createMarker([point.lng, point.lat], `survey-point-marker source-${point.source || 'csv'}`, pointIconHtml(point), 650)
-    item.on('click', (event: any) => {
-      event.originEvent?.stopPropagation?.()
+    ;((item as any).__content as HTMLElement).addEventListener('click', (event) => {
+      event.stopPropagation()
       if (props.mode === 'add-point') return
       if (props.mode === 'connect') handleEndpointClick(`point:${point.id}`, [point.lng, point.lat])
       else emit('point-click', point.id)
@@ -200,6 +210,102 @@ function openLineMenu(line: SurveyLine, from: [number, number], to: [number, num
   const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
   menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">${line.id}</div><div class="survey-line-menu-meta">${line.fromId} → ${line.toId}</div><button class="survey-line-menu-btn danger" data-line-action="remove" data-line-id="${line.id}"><span class="icon">🗑</span>删除该管线</button></div>`)
   menuWindow.open(map, mid)
+}
+
+type LineHit = { line: SurveyLine; from: [number, number]; to: [number, number] }
+let linePointerGesture: {
+  pointerId: number
+  startX: number
+  startY: number
+  hit: LineHit
+} | null = null
+let suppressLineClickUntil = 0
+
+function pointToSegmentDistance(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax
+  const dy = by - ay
+  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay)
+  const ratio = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+  return Math.hypot(px - (ax + ratio * dx), py - (ay + ratio * dy))
+}
+
+/** 在 AMap 收到 pointerdown 之前，用屏幕坐标判断是否按中了勘测线。 */
+function findLineAtClientPoint(clientX: number, clientY: number): LineHit | null {
+  if (!map || !mapRef.value || !props.surveyLinesVisible) return null
+  const rect = mapRef.value.getBoundingClientRect()
+  const x = clientX - rect.left
+  const y = clientY - rect.top
+  let nearest: { distance: number; hit: LineHit } | null = null
+  for (const line of props.surveyLines) {
+    const from = resolveEndpoint(line.fromId)
+    const to = resolveEndpoint(line.toId)
+    if (!from || !to) continue
+    const a = map.lngLatToContainer(from)
+    const b = map.lngLatToContainer(to)
+    const distance = pointToSegmentDistance(x, y, a.getX(), a.getY(), b.getX(), b.getY())
+    if (distance <= 10 && (!nearest || distance < nearest.distance)) {
+      nearest = { distance, hit: { line, from, to } }
+    }
+  }
+  return nearest?.hit ?? null
+}
+
+function stopLinePointerEvent(event: PointerEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
+function onMapPointerDownCapture(event: PointerEvent) {
+  if (props.mode !== 'view' || event.button !== 0) return
+  const target = event.target as HTMLElement
+  // 点位和引入口优先处理自身点击，编辑面板/弹窗也不能被线命中逻辑截获。
+  if (target.closest('.survey-point-marker, .survey-inlet-marker, .survey-editor-panel, .amap-info-window')) return
+  const hit = findLineAtClientPoint(event.clientX, event.clientY)
+  if (!hit) return
+  stopLinePointerEvent(event)
+  map?.setStatus?.({ dragEnable: false })
+  linePointerGesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, hit }
+  mapRef.value?.setPointerCapture?.(event.pointerId)
+}
+
+function onMapPointerMoveCapture(event: PointerEvent) {
+  if (!linePointerGesture || event.pointerId !== linePointerGesture.pointerId) return
+  stopLinePointerEvent(event)
+}
+
+function finishLinePointer(event: PointerEvent, openMenu: boolean) {
+  const gesture = linePointerGesture
+  if (!gesture || event.pointerId !== gesture.pointerId) return
+  stopLinePointerEvent(event)
+  mapRef.value?.releasePointerCapture?.(event.pointerId)
+  linePointerGesture = null
+  restoreMapDrag()
+  suppressLineClickUntil = performance.now() + 500
+  const moved = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY)
+  if (openMenu && moved <= 6) openLineMenu(gesture.hit.line, gesture.hit.from, gesture.hit.to)
+}
+
+function onMapPointerUpCapture(event: PointerEvent) {
+  finishLinePointer(event, true)
+}
+
+function onMapPointerCancelCapture(event: PointerEvent) {
+  finishLinePointer(event, false)
+}
+
+function onMapClickCapture(event: MouseEvent) {
+  if (performance.now() >= suppressLineClickUntil) return
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
 }
 
 function renderSurveyLines() {
@@ -223,17 +329,13 @@ function renderSurveyLines() {
       cursor: 'pointer',
       bubble: false,
     })
-    hitArea.on('click', (event: any) => {
-      event.originEvent?.stopPropagation?.()
-      openLineMenu(lineData, from, to)
-    })
     bindTip(hitArea, `<b>${lineData.id}</b><br>${lineData.fromId} → ${lineData.toId}`)
     addLayer('line', hitArea)
     const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
     const angle = Math.atan2(to[0] - from[0], to[1] - from[1]) * 180 / Math.PI
     const arrow = createMarker(mid, 'survey-line-arrow', arrowHtml(angle), 720, true)
-    arrow.on('click', (event: any) => {
-      event.originEvent?.stopPropagation?.()
+    ;((arrow as any).__content as HTMLElement).addEventListener('click', (event) => {
+      event.stopPropagation()
       openLineMenu(lineData, from, to)
     })
     addLayer('arrow', arrow)
@@ -358,7 +460,13 @@ onMounted(async () => {
     menuWindow = new AMapApi.InfoWindow({ isCustom: false, offset: new AMapApi.Pixel(0, -8), closeWhenClickMap: false })
     map.on('click', handleMapClick)
     map.on('mousemove', handleMouseMove)
+    mapRef.value?.addEventListener('pointerdown', onMapPointerDownCapture, true)
+    mapRef.value?.addEventListener('pointermove', onMapPointerMoveCapture, true)
+    mapRef.value?.addEventListener('pointerup', onMapPointerUpCapture, true)
+    mapRef.value?.addEventListener('pointercancel', onMapPointerCancelCapture, true)
+    mapRef.value?.addEventListener('click', onMapClickCapture, true)
     document.addEventListener('click', onDocumentClick)
+    window.addEventListener('blur', restoreMapDrag)
     renderPipes()
     renderInlets()
     renderSurveyPoints()
@@ -381,7 +489,13 @@ watch(() => props.surveyLinesVisible, (value) => { toggleLayer('line', value); t
 watch(() => props.mode, (mode) => { menuWindow?.close(); if (mode !== 'connect') clearPending() })
 
 onBeforeUnmount(() => {
+  mapRef.value?.removeEventListener('pointerdown', onMapPointerDownCapture, true)
+  mapRef.value?.removeEventListener('pointermove', onMapPointerMoveCapture, true)
+  mapRef.value?.removeEventListener('pointerup', onMapPointerUpCapture, true)
+  mapRef.value?.removeEventListener('pointercancel', onMapPointerCancelCapture, true)
+  mapRef.value?.removeEventListener('click', onMapClickCapture, true)
   document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('blur', restoreMapDrag)
   map?.off('click', handleMapClick)
   map?.off('mousemove', handleMouseMove)
   tipWindow?.close()
