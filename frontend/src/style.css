@@ -341,16 +341,10 @@ html, body, #app {
 }
 
 /* ============ Survey Map:模式光标 ============ */
-/* add-point 模式时,地图区域鼠标变 crosshair,提示用户"点击加点位"
- *  - class 加在 .survey-map-wrapper 上(.leaflet-container 在它的子元素 #map 上)
- *  - 用后代选择器而不是 .leaflet-container.mode-add-point
- */
-.mode-add-point .leaflet-container,
-.mode-add-point .leaflet-container .leaflet-grab,
-.mode-add-point .leaflet-container .leaflet-interactive {
-  cursor: crosshair !important;
-}
-.mode-add-point .leaflet-container .leaflet-grab:hover {
+/* add-point 模式时,地图区域鼠标变 crosshair,提示用户"点击加点位" */
+.mode-add-point .amap-container,
+.mode-add-point .amap-maps,
+.mode-add-point .amap-overlays {
   cursor: crosshair !important;
 }
 
@@ -358,24 +352,15 @@ html, body, #app {
  *  - 空白处点击不响应(找不到 snap 目标),但视觉上提示"瞄准端点"
  *  - 拖拽中(按住)显示 grabbing
  */
-.mode-connect .leaflet-container,
-.mode-connect .leaflet-container .leaflet-grab,
-.mode-connect .leaflet-container .leaflet-interactive {
+.mode-connect .amap-container,
+.mode-connect .amap-maps,
+.mode-connect .amap-overlays {
   cursor: crosshair !important;
-}
-.mode-connect.is-dragging .leaflet-container,
-.mode-connect.is-dragging .leaflet-container .leaflet-grab {
-  cursor: grabbing !important;
 }
 
 /* view 模式:拖动点位时光标(已禁用,占位) */
 
 /* ============ Survey Map:add-point 三选菜单 popup ============ */
-.survey-add-popup .leaflet-popup-content {
-  margin: 0;
-  padding: 0;
-  min-width: 160px;
-}
 .survey-add-menu {
   display: flex;
   flex-direction: column;
@@ -554,11 +539,6 @@ html, body, #app {
 }
 
 /* ============ Survey Map:管线点击弹菜单(删除选项) ============ */
-.survey-line-popup .leaflet-popup-content {
-  margin: 0;
-  padding: 0;
-  min-width: 200px;
-}
 .survey-line-menu {
   display: flex;
   flex-direction: column;
@@ -719,43 +699,46 @@ html, body, #app {
   justify-content: center !important;
 }
 
-/* ====== 管线和引入口 hover 动效 ======
- * - 管线（SVG path）：加粗 + 变蓝
- * - 引入口（divIcon inner div）：放大 + 变蓝 + 加阴影
- * - 都用 CSS :hover + transition（不写 JS 事件，浏览器原生 60fps 平滑）
- */
-
-/* 管线 hover：3px → 6px，绿 → 褐，0.2s 缓动
- * 注意只覆盖 stroke 属性（不写 color/weight/opacity，因为这些是 Leaflet 写到 SVG attribute 的）
- * 褐色选 #8B4513（saddlebrown）：跟绿色管道互补，地图底图上对比强
- *
- * ⚠️ 必须显式设 stroke / stroke-width / stroke-opacity 的 CSS property:
- * - 否则这些值来自 Leaflet 的 SVG attribute(path.setAttribute(...))
- * - CSS transition 监听 CSS property 变化,对 SVG attribute 的变化监听不可靠
- * - 显式 CSS property 强制走 CSS 路径,transition 才能稳定工作
- */
-.pipe-line {
-  stroke: #67c23a;
-  stroke-width: 3;
-  stroke-opacity: 0.75;
-  transition: stroke 0.2s ease, stroke-width 0.2s ease, stroke-opacity 0.2s ease;
-}
-.pipe-line:hover,
-.pipe-line.selected {
-  stroke: #8B4513;
-  stroke-width: 6;
-  stroke-opacity: 1;
+/* AMap 主地图覆盖物：复用原有图标视觉。 */
+.amap-marker-content .unit-progress-marker,
+.amap-marker-content .amap-facility-marker,
+.amap-marker-content .community-progress-marker,
+.amap-marker-content .community-boundary-info {
+  background: transparent !important;
+  border: 0 !important;
 }
 
-/* 引入口 hover：14px → 24px（scale 1.7），灰 → 蓝，加阴影，提至顶层
- * - 双层结构(跟社区大圆一致):
- *   .leaflet-marker-icon(inlet-marker)  ← Leaflet wrapper,跑定位 translate3d
- *     .facility-anim                    ← 外层包裹,隔离 Leaflet 定位 transform
- *       <div>                            ← 实际内容层,跑 hover transition
- * - hover transition 跑在最内层 div,不和 Leaflet wrapper 的定位 transform 竞争
- * - transform-origin 默认 50% 50%，inner div 的圆心正好对齐 latlng（iconAnchor: [7,7]），
- *   所以围绕圆心放大，位置不偏移
- */
+.amap-business-tip {
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+  color: #303133;
+  font-size: 12px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+/* 纯悬停提示不得挡住 Marker/Polyline 的点击；带按钮的菜单不受此规则影响。 */
+.amap-info-contentContainer:has(.amap-business-tip),
+.amap-info-contentContainer:has(.amap-business-tip) * {
+  pointer-events: none !important;
+}
+
+/* 方向箭头同时作为勘测管线的明确点击入口。 */
+.survey-line-arrow {
+  cursor: pointer;
+}
+
+.amap-logo,
+.amap-copyright {
+  /* 高德服务条款要求保留版权标识，不得隐藏。 */
+  pointer-events: none;
+}
+
+/* 主地图设施 hover/selected 动效。 */
 .inlet-marker .facility-anim > div {
   transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   cursor: pointer;
@@ -763,12 +746,7 @@ html, body, #app {
 .inlet-marker:hover {
   z-index: 1000;  /* 提至顶层，避免被相邻 inlet 或 progress marker 盖住 */
 }
-/* hover(鼠标悬停)/hovered(JS 持久化 hover)/selected(click 选中)三种状态共享同一套视觉
- * - 之前只有 :hover 和 .selected,加了 .hovered 是因为 mouseover JS 触发后 mouse 移走前
- *   .selected class 还没加,需要 .hovered 占位保持视觉一致
- * - class z-index:1000 会被 Leaflet 的 inline z-index 赢过,实际无效;真正起作用的是 JS
- *   moveFacilityToHighlight 把 marker 搬到 facilityHighlightPane(z=750)
- */
+/* hover / hovered / selected 三种状态共享同一套视觉。 */
 .inlet-marker:hover .facility-anim > div,
 .inlet-marker.hovered .facility-anim > div,
 .inlet-marker.selected .facility-anim > div {
@@ -777,11 +755,7 @@ html, body, #app {
   box-shadow: 0 2px 8px rgba(64, 158, 255, 0.6);
 }
 
-/* 绝缘接头 hover/hovered/selected:放大 + 提至顶层（无阴影，颜色保留红色不变）
- * - 跟引入口一样的视觉一致性,但去掉了 background/box-shadow(接头本来就是红色 ✕)
- * - 双层结构同上,hover transition 跑最内层 div
- * - class z-index:1000 同上无效,真正起作用的是 facilityHighlightPane
- */
+/* 绝缘接头 hover/hovered/selected：放大，保留红色。 */
 .joint-marker .facility-anim > div {
   transition: transform 0.2s ease;
   cursor: pointer;
@@ -795,10 +769,7 @@ html, body, #app {
   transform: scale(1.7);
 }
 
-/* 调压箱 hover/hovered/selected:放大 + 提至顶层,颜色保留蓝色不变
- * 双层结构同上(跟社区大圆一致),hover transition 跑最内层 div
- * 跟绝缘接头规则几乎一样,只是 className 不同,逻辑独立分开写
- */
+/* 调压箱 hover/hovered/selected：放大，保留蓝色。 */
 .regulator-marker .facility-anim > div {
   transition: transform 0.2s ease;
   cursor: pointer;
@@ -841,18 +812,6 @@ html, body, #app {
   padding: 40px;
   color: #909399;
   font-size: 14px;
-}
-
-/* 去掉 Leaflet poly 被点击后的浏览器黑色 focus outline（SVG 元素的可访问性焦点环） */
-.leaflet-interactive,
-.leaflet-interactive:focus,
-.leaflet-interactive:active {
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent;
-}
-svg.leaflet-zoom-animated path.leaflet-interactive,
-svg.leaflet-zoom-animated path.leaflet-interactive:focus {
-  outline: none !important;
 }
 
 /* 小区概览大圆圈出场动效：
@@ -967,21 +926,6 @@ svg.leaflet-zoom-animated path.leaflet-interactive:focus {
 
 .community-boundary-info-row > span:last-child {
   text-align: left;
-}
-
-/* 小区概览切到设施层级时的整体出现动效；左下角图例勾选不触发这个 class */
-.detail-fading .leaflet-overlay-pane canvas,
-.detail-fading .leaflet-overlay-pane svg path,
-.detail-fading .leaflet-marker-pane .leaflet-marker-icon > .facility-anim,
-.detail-fading .leaflet-progressDefault-pane .leaflet-marker-icon > *,
-.detail-fading .leaflet-progressHighlight-pane .leaflet-marker-icon > * {
-  animation: detailFadeIn 0.2s ease-out both;
-  will-change: opacity;
-}
-
-@keyframes detailFadeIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
 }
 
 /* ====== 右侧单元信息卡片（单击控制单元浮出，给领导看）======
