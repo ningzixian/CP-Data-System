@@ -398,6 +398,11 @@ function syncViewMode() {
   if (!map) return
   const next = map.getZoom() < COMMUNITY_VIEW_ZOOM
   if (next === isCommunityView) return
+  // 从设施详情地图切换到小区总览时，不保留任何设施或控制单元选中状态。
+  if (next) {
+    clearAll()
+    if (store.hoveredUnit) store.hoverUnit(null)
+  }
   isCommunityView = next
   applyVisibility()
   emit('view-mode', next ? 'community' : 'detail')
@@ -424,7 +429,8 @@ function renderAll() {
 
 function zoomToCommunityView() {
   if (!map) return
-  if (store.selectedUnit) store.selectUnit(null)
+  clearAll()
+  if (store.hoveredUnit) store.hoverUnit(null)
   if (map.getZoom() > 16) map.setZoom(16, false, 600)
 }
 
@@ -495,6 +501,9 @@ watch(() => store.selectedUnit, (unit) => {
 }, { deep: false })
 
 onBeforeUnmount(() => {
+  clearFacilitySelection()
+  if (store.selectedUnit) store.selectUnit(null)
+  if (store.hoveredUnit) store.hoverUnit(null)
   infoWindow?.close()
   map?.destroy()
   map = null

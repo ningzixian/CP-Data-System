@@ -7,17 +7,15 @@
 
 // ============== 检测项定义 ==============
 
-/** 9 项检测项编码（对应报价文件 R3-R11） */
+/** 7 项现场检测编码 */
 export type InspectionItemCode =
-  | 'PLAN_OUTLINE'              // ① 编制方案大纲
-  | 'JOINT_VERIFY'              // ② 绝缘接头位置和绝缘性能复核
-  | 'SOIL_RESISTIVITY'          // ③ 土壤电阻率检测
-  | 'DC_STRAY_CURRENT'          // ④ 直流杂散电流检测
-  | 'COATING_DETECT'            // ⑤ 管道防腐层非开挖检测
-  | 'PIPE_GROUND_POTENTIAL'     // ⑥ 管地腐蚀电位检测
-  | 'ELECTRIC_CONTINUITY'       // ⑦ 管道电联通性检测
-  | 'INLET_PARAM'               // ⑧ 引入口参数测量
-  | 'DATA_ENTRY'                // ⑨ 检测数据填报
+  | 'JOINT_VERIFY'              // ① 绝缘接头位置和绝缘性能复核
+  | 'SOIL_RESISTIVITY'          // ② 土壤电阻率检测
+  | 'DC_STRAY_CURRENT'          // ③ 直流杂散电流检测
+  | 'COATING_DETECT'            // ④ 管道防腐层非开挖检测
+  | 'PIPE_GROUND_POTENTIAL'     // ⑤ 管地腐蚀电位检测
+  | 'ELECTRIC_CONTINUITY'       // ⑥ 管道电联通性检测
+  | 'INLET_PARAM'               // ⑦ 引入口参数测量
 
 export interface InspectionItemField {
   key: string
@@ -75,7 +73,7 @@ export interface CorrosionUnit {
   address?: string
   /** 管道走向轨迹（GCJ-02），用于在地图上画出该腐控单元的燃气管线 */
   polyline?: Array<[number, number]>
-  inspection_progress: number     // 9 项检测整体进度 0-1
+  inspection_progress: number     // 7 项检测整体进度 0-1
   inspection_status: InspectionStatus
   last_inspection_at?: string     // ISO datetime
   note?: string

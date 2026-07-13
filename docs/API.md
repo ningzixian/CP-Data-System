@@ -88,7 +88,7 @@
 ```
 
 **字段说明**：
-- `inspection_progress` — 9 项检测的整体进度，0~1 之间小数
+- `inspection_progress` — 7 项检测的整体进度，0~1 之间小数；只有 `passed` 计入完成，`exception` 不计入
 - `inspection_status` — `pending` / `in_progress` / `completed` / `exception`
 - `last_inspection_at` — 最近一次检测时间（由后端在新增/更新检测记录时自动维护）
 
@@ -116,12 +116,12 @@
 ```json
 [
   {
-    "code": "PLAN_OUTLINE",
-    "name": "① 编制方案大纲",
-    "pricePerKm": 450,
+    "code": "JOINT_VERIFY",
+    "name": "① 绝缘接头位置和绝缘性能复核",
+    "pricePerKm": 12500,
     "fields": [
-      { "key": "plan_version", "label": "方案版本" },
-      { "key": "deadline", "label": "计划完成日期" }
+      { "key": "joint_count", "label": "接头数量" },
+      { "key": "insulation_resistance", "label": "绝缘电阻(MΩ)" }
     ]
   }
 ]
@@ -200,29 +200,27 @@
       "unit_name": "JN-02",
       "lng": 118.857,
       "lat": 31.948,
-      "progress": 0.33,
+      "progress": 0.43,
       "status": "in_progress",
       "items": [
-        { "code": "PLAN_OUTLINE", "name": "① 编制方案大纲", "status": "passed" },
-        { "code": "JOINT_VERIFY", "name": "② 绝缘接头位置和绝缘性能复核", "status": "passed" },
-        { "code": "SOIL_RESISTIVITY", "name": "③ 土壤电阻率检测", "status": "passed" },
-        { "code": "DC_STRAY_CURRENT", "name": "④ 直流杂散电流检测", "status": "pending" },
-        { "code": "COATING_DETECT", "name": "⑤ 防腐层非开挖检测", "status": "pending" },
-        { "code": "PIPE_GROUND_POTENTIAL", "name": "⑥ 管地腐蚀电位检测", "status": "pending" },
-        { "code": "ELECTRIC_CONTINUITY", "name": "⑦ 管道电联通性检测", "status": "pending" },
-        { "code": "INLET_PARAM", "name": "⑧ 引入口参数测量", "status": "pending" },
-        { "code": "DATA_ENTRY", "name": "⑨ 检测数据填报", "status": "pending" }
+        { "code": "JOINT_VERIFY", "name": "① 绝缘接头位置和绝缘性能复核", "status": "passed" },
+        { "code": "SOIL_RESISTIVITY", "name": "② 土壤电阻率检测", "status": "passed" },
+        { "code": "DC_STRAY_CURRENT", "name": "③ 直流杂散电流检测", "status": "passed" },
+        { "code": "COATING_DETECT", "name": "④ 防腐层非开挖检测", "status": "pending" },
+        { "code": "PIPE_GROUND_POTENTIAL", "name": "⑤ 管地腐蚀电位检测", "status": "pending" },
+        { "code": "ELECTRIC_CONTINUITY", "name": "⑥ 管道电联通性检测", "status": "pending" },
+        { "code": "INLET_PARAM", "name": "⑦ 引入口参数测量", "status": "pending" }
       ]
     }
   ],
   "items": [
-    { "code": "PLAN_OUTLINE", "name": "① 编制方案大纲" },
+    { "code": "JOINT_VERIFY", "name": "① 绝缘接头位置和绝缘性能复核" },
     ...
   ]
 }
 ```
 
-> 该接口已聚合好 9 项检测的状态，前端直接用于雷达图和详情矩阵渲染。  
+> 该接口已聚合好 7 项检测的状态，前端直接用于雷达图和详情矩阵渲染。
 > 后端推荐用 SQL JOIN 一次查出，不要让前端做 N+1 查询。
 
 ---
@@ -242,7 +240,7 @@
 | `lng` | | 经度 |
 | `lat` | | 纬度 |
 | `address` | | 地址 |
-| `item_code` | ✅ | 9 项检测项编码（见下表） |
+| `item_code` | ✅ | 7 项检测项编码（见下表） |
 | `status` | | pending / passed / exception |
 | `inspector` | | 检测员 |
 | `inspection_date` | | 检测时间（ISO 8601 或 Excel 日期） |
@@ -251,19 +249,17 @@
 | `bd_coord` | | 北斗坐标 |
 | `note` | | 备注 |
 
-**9 项检测项编码表**：
+**7 项检测项编码表**：
 
 | code | 名称 |
 |---|---|
-| `PLAN_OUTLINE` | ① 编制方案大纲 |
-| `JOINT_VERIFY` | ② 绝缘接头位置和绝缘性能复核 |
-| `SOIL_RESISTIVITY` | ③ 土壤电阻率检测 |
-| `DC_STRAY_CURRENT` | ④ 直流杂散电流检测 |
-| `COATING_DETECT` | ⑤ 管道防腐层非开挖检测 |
-| `PIPE_GROUND_POTENTIAL` | ⑥ 管地腐蚀电位检测 |
-| `ELECTRIC_CONTINUITY` | ⑦ 管道电联通性检测 |
-| `INLET_PARAM` | ⑧ 引入口参数测量 |
-| `DATA_ENTRY` | ⑨ 检测数据填报 |
+| `JOINT_VERIFY` | ① 绝缘接头位置和绝缘性能复核 |
+| `SOIL_RESISTIVITY` | ② 土壤电阻率检测 |
+| `DC_STRAY_CURRENT` | ③ 直流杂散电流检测 |
+| `COATING_DETECT` | ④ 管道防腐层非开挖检测 |
+| `PIPE_GROUND_POTENTIAL` | ⑤ 管地腐蚀电位检测 |
+| `ELECTRIC_CONTINUITY` | ⑥ 管道电联通性检测 |
+| `INLET_PARAM` | ⑦ 引入口参数测量 |
 
 **响应**：
 
@@ -316,9 +312,9 @@ interface InspectionRecord {
   id: number
   unit_id: number
   point_id?: number
-  item_code: 'PLAN_OUTLINE' | 'JOINT_VERIFY' | 'SOIL_RESISTIVITY' | 'DC_STRAY_CURRENT'
+  item_code: 'JOINT_VERIFY' | 'SOIL_RESISTIVITY' | 'DC_STRAY_CURRENT'
            | 'COATING_DETECT' | 'PIPE_GROUND_POTENTIAL' | 'ELECTRIC_CONTINUITY'
-           | 'INLET_PARAM' | 'DATA_ENTRY'
+           | 'INLET_PARAM'
   item_name?: string
   work_hours?: number
   personnel_count?: number

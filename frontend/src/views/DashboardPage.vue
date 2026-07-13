@@ -19,7 +19,7 @@ function renderChart() {
 
   const seriesData = store.dashboard.rows.map((r) => ({
     name: r.unit_name,
-    value: r.items.map((it) => (it.status === 'passed' || it.status === 'exception' ? 1 : 0)),
+    value: r.items.map((it) => (it.status === 'passed' ? 1 : 0)),
     itemStyle: { opacity: 0.6 },
   }))
 
@@ -29,8 +29,8 @@ function renderChart() {
       formatter: (params: any) => {
         const row = store.dashboard?.rows.find((r) => r.unit_name === params.name)
         if (!row) return ''
-        const passed = row.items.filter((i) => i.status === 'passed' || i.status === 'exception').length
-        return `<b>${row.unit_name}</b><br/>完成 ${passed} / 9 项 (${Math.round(row.progress * 100)}%)`
+        const passed = row.items.filter((i) => i.status === 'passed').length
+        return `<b>${row.unit_name}</b><br/>完成 ${passed} / ${row.items.length} 项 (${Math.round(row.progress * 100)}%)`
       },
     },
     legend: { bottom: 0, type: 'scroll' },
@@ -110,7 +110,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
     <el-card style="margin-top:20px" shadow="never">
       <template #header>
         <div style="display:flex;align-items:center">
-          <b style="font-size:15px">各腐控单元 9 项检测完成度（雷达图）</b>
+          <b style="font-size:15px">各腐控单元 7 项检测完成度（雷达图）</b>
           <div style="flex:1"></div>
           <span style="font-size:12px;color:#909399">外环 = 已完成，内环 = 待开始</span>
         </div>

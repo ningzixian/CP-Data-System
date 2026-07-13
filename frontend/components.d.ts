@@ -43,6 +43,7 @@ declare module 'vue' {
     StatusTag: typeof import('./src/components/StatusTag.vue')['default']
     SurveyMapView: typeof import('./src/components/SurveyMapView.vue')['default']
     UnitCard: typeof import('./src/components/UnitCard.vue')['default']
+    UnitDataModules: typeof import('./src/components/UnitDataModules.vue')['default']
     UnitInfoCard: typeof import('./src/components/UnitInfoCard.vue')['default']
   }
   export interface ComponentCustomProperties {

@@ -16,6 +16,7 @@ import type { CorrosionUnit } from '@/types/models'
 
 // ============== 原始数据结构 ==============
 export interface CsvJoint {
+  community: string
   fid: number
   lng: number
   lat: number
@@ -39,6 +40,7 @@ export interface CsvPipe {
 }
 
 export interface CsvRegulator {
+  community: string
   fid: number
   lng: number
   lat: number
@@ -48,6 +50,7 @@ export interface CsvRegulator {
 }
 
 export interface CsvInlet {
+  community: string
   fid: number
   lng: number
   lat: number
@@ -166,7 +169,7 @@ async function loadCommunityData(community: string): Promise<{
         const pt = parseWKTPoint(r.WKT)
         return pt
           ? ({
-              fid: parseInt(r.fid) || 0,
+              community, fid: parseInt(r.fid) || 0,
               lng: pt[0], lat: pt[1],
               ecode: r.ECODE || '', type: r.TYPE || '绝缘接头',
               pressured: r.PRESSURED || '', pipeno: r.PIPENO,
@@ -194,7 +197,7 @@ async function loadCommunityData(community: string): Promise<{
         const pt = parseWKTPoint(r.WKT)
         return pt
           ? {
-              fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
+              community, fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
               ecode: r.ECODE || '', name: r.NAME || r.ECODE,
               pressured: r.PRESSURED || '',
             }
@@ -207,7 +210,7 @@ async function loadCommunityData(community: string): Promise<{
         const pt = parseWKTPoint(r.WKT)
         return pt
           ? {
-              fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
+              community, fid: parseInt(r.fid) || 0, lng: pt[0], lat: pt[1],
               ecode: r.ECODE || '', pipeno: r.PIPENO || '',
               pressured: r.PRESSURED || '',
             }

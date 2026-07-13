@@ -6,13 +6,17 @@ import UnitCard from '@/components/UnitCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import InspectionForm from '@/components/InspectionForm.vue'
 import UnitInfoCard from '@/components/UnitInfoCard.vue'
-import type { CorrosionUnit } from '@/types/models'
+import UnitDataModules from '@/components/UnitDataModules.vue'
+import type { CorrosionUnit, InspectionItemCode } from '@/types/models'
 
 const store = useCpStore()
 const mapRef = ref<InstanceType<typeof MapView> | null>(null)
 
 const drawerOpen = ref(false)
 const activeTab = ref('')
+const dataModeActive = ref(false)
+const dataModulesVisible = ref(false)
+const dataModulesClosing = ref(false)
 
 /** 五种设施的显隐状态,左下角图例面板的 checkbox 控制
  *  - 全部默认 true,跟改之前行为一致
@@ -29,7 +33,9 @@ const facilityVisibility = ref({
   inlet: true,       // 引入口
 })
 
-const unitCardVisible = computed(() => !!store.selectedUnit && !drawerOpen.value)
+const unitCardVisible = computed(() =>
+  !!store.selectedUnit && !drawerOpen.value && !dataModeActive.value,
+)
 
 /** 小区清单（固定顺序，与侧边栏菜单一致）
  *  - 决定 communities 计算的展示顺序与“占位”位置
@@ -138,6 +144,38 @@ const COMMUNITY_ZOOM_DURATION_MS = 600
 let selectedUnitScrollTimer: number | null = null
 let communityZoomScrollTimer: number | null = null
 let focusedCommunityScrollTimer: number | null = null
+let dataModulesTimer: number | null = null
+const DATA_MODULE_CLOSE_MS = 960
+
+function clearDataModulesTimer() {
+  if (dataModulesTimer !== null) {
+    window.clearTimeout(dataModulesTimer)
+    dataModulesTimer = null
+  }
+}
+
+function resetDataModuleMode() {
+  clearDataModulesTimer()
+  dataModulesVisible.value = false
+  dataModulesClosing.value = false
+  dataModeActive.value = false
+}
+
+function closeDataModuleMode() {
+  if (dataModulesClosing.value) return
+  clearDataModulesTimer()
+  if (!dataModulesVisible.value) {
+    dataModeActive.value = false
+    return
+  }
+  dataModulesClosing.value = true
+  dataModulesVisible.value = false
+  dataModulesTimer = window.setTimeout(() => {
+    dataModulesTimer = null
+    dataModulesClosing.value = false
+    dataModeActive.value = false
+  }, DATA_MODULE_CLOSE_MS)
+}
 
 function clearSidebarTimers() {
   if (selectedUnitScrollTimer !== null) {
@@ -172,6 +210,11 @@ function selectUnit(u: CorrosionUnit) {
  *   时机错了会滚到折叠态 offsetTop,卡片位置算错
  */
 watch(() => store.selectedUnit?.id, (newId, oldId) => {
+  if (newId !== oldId) {
+    // 数据模块打开时切换单元：先完成收牌，再允许新单元信息卡片入场。
+    if (dataModeActive.value) closeDataModuleMode()
+    else resetDataModuleMode()
+  }
   if (newId === undefined || newId === oldId) return
   const unit = store.selectedUnit
   if (!unit) return
@@ -192,6 +235,7 @@ watch(() => store.selectedUnit?.id, (newId, oldId) => {
 
 function openDetail(u: CorrosionUnit) {
   store.selectUnit(u)
+  resetDataModuleMode()
   // 卡片"查看完整录入"触发抽屉,小卡片由 unitCardVisible 自动隐藏
   drawerOpen.value = true
   activeTab.value = store.items[0]?.code || ''
@@ -206,6 +250,29 @@ function onDrawerClosed() {
 /** 右侧 UnitInfoCard 底部"查看完整录入"按钮回调 → 触发抽屉 */
 function openDetailFromCard() {
   if (store.selectedUnit) openDetail(store.selectedUnit)
+}
+
+function openDataModules() {
+  if (!store.selectedUnit || dataModeActive.value) return
+  clearDataModulesTimer()
+  dataModulesClosing.value = false
+  dataModeActive.value = true
+  // 先等待右侧信息卡片完成 150ms 离场，再从地图右上方展开牌组。
+  dataModulesTimer = window.setTimeout(() => {
+    dataModulesTimer = null
+    if (store.selectedUnit && dataModeActive.value) dataModulesVisible.value = true
+  }, 180)
+}
+
+function returnToUnitCard() {
+  if (!dataModeActive.value) return
+  closeDataModuleMode()
+}
+
+/** 数据模块点击预留接口：后续可按检测项目编码打开对应的数据视图。 */
+function onDataModuleSelect(code: InspectionItemCode) {
+  // 当前阶段按需求不执行页面跳转或数据操作。
+  void code
 }
 
 /** 标记"上次点的大圆名字",watch 里如果新值跟它匹配就跳过
@@ -295,6 +362,10 @@ watch(lastFocusedCommunity, (name) => {
 
 onBeforeUnmount(() => {
   clearSidebarTimers()
+  resetDataModuleMode()
+  drawerOpen.value = false
+  if (store.hoveredUnit) store.hoverUnit(null)
+  if (store.selectedUnit) store.selectUnit(null)
 })
 
 const selectedUnit = computed(() => store.selectedUnit)
@@ -316,7 +387,7 @@ const tabItems = computed(() =>
 
 <template>
   <div class="main-content">
-    <div class="side-panel">
+    <div class="side-panel map-side-panel">
       <div class="stats-bar">
         <div class="stat-item">
           <div class="num" style="color:#67c23a">{{ store.stats.completed }}</div>
@@ -421,9 +492,16 @@ const tabItems = computed(() =>
       </div>
     </div>
 
+    <UnitDataModules
+      :visible="dataModulesVisible && !!selectedUnit"
+      @return="returnToUnitCard"
+      @select="onDataModuleSelect"
+    />
+
     <UnitInfoCard
       :visible="unitCardVisible"
       @open-detail="openDetailFromCard"
+      @open-data-modules="openDataModules"
     />
 
     <el-drawer
@@ -466,7 +544,7 @@ const tabItems = computed(() =>
           </el-col>
         </el-row>
 
-        <h3 style="margin-top:24px">9 项检测数据录入</h3>
+        <h3 style="margin-top:24px">7 项检测数据录入</h3>
         <el-tabs v-model="activeTab">
           <el-tab-pane v-for="(it, idx) in tabItems" :key="it.code" :name="it.code">
             <template #label>

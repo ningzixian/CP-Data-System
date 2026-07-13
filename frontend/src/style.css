@@ -69,7 +69,10 @@ html, body, #app {
   width: 360px;
   background: #fff;
   border-right: 1px solid #ebeef5;
-  overflow-y: auto;
+  /* 主地图和管线勘测共用：数据不足一屏时也保留纵向滚动条，避免列表变化导致宽度跳动。 */
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   flex-shrink: 0;
 }
 
@@ -207,27 +210,59 @@ html, body, #app {
   border-bottom: 1px solid #ebeef5;
 }
 
-/* SurveyPage 侧栏顶部菜单栏:小区名 + 右侧元信息(同行) */
-.survey-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  background: #f5f7fa;
-  border-bottom: 1px solid #ebeef5;
+/* 主地图状态统计始终吸附在侧栏顶部，小区列表在其下方独立滚动。 */
+.map-side-panel > .stats-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
-.survey-header .survey-header-name {
+
+/* 程序定位小区标题时，为顶部吸附的统计栏预留空间。 */
+.map-side-panel .community-header {
+  scroll-margin-top: 80px;
+}
+
+/* SurveyPage 工具栏下方的小区折叠菜单。 */
+.survey-community-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 16px;
+  border: 0;
+  border-bottom: 1px solid #ebeef5;
+  background: #f5f7fa;
+  color: #303133;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease;
+}
+.survey-community-toggle:hover {
+  background: #ecf5ff;
+}
+.survey-community-arrow {
+  color: #909399;
+  font-size: 10px;
+  transform-origin: center;
+  transition: transform 0.18s ease;
+}
+.survey-community-toggle.expanded .survey-community-arrow {
+  transform: rotate(90deg);
+}
+.survey-community-title {
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
-  flex-shrink: 0;
 }
-.survey-header .survey-header-meta {
-  font-size: 12px;
+.survey-community-meta {
+  margin-left: auto;
   color: #909399;
-  text-align: right;
+  font-size: 12px;
+  font-weight: 400;
   white-space: nowrap;
+}
+.survey-community-content {
+  background: #fff;
 }
 
 /* SurveyPage 工具栏:模式切换 + 撤销/重做 */
@@ -238,6 +273,14 @@ html, body, #app {
   padding: 10px 12px;
   background: #fff;
   border-bottom: 1px solid #ebeef5;
+}
+
+/* 管线勘测的五个编辑按钮始终吸附在侧栏顶部。 */
+.survey-side-panel > .survey-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 .survey-toolbar-row {
   display: flex;
@@ -329,6 +372,52 @@ html, body, #app {
   white-space: nowrap;
 }
 
+.survey-point-marker {
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+.survey-point-marker:hover,
+.survey-point-marker.is-focused {
+  transform: scale(1.45);
+  filter: drop-shadow(0 3px 5px rgba(124, 58, 237, 0.45));
+  z-index: 1000;
+}
+.survey-point-marker.is-focused .survey-point-icon {
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.14);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.22);
+  animation: surveyPointRingExpand 0.55s cubic-bezier(0.2, 0.75, 0.25, 1) 1 both;
+}
+@keyframes surveyPointRingExpand {
+  0% {
+    background: rgba(124, 58, 237, 0);
+    box-shadow: 0 0 0 -14px rgba(124, 58, 237, 0.22);
+  }
+  100% {
+    background: rgba(124, 58, 237, 0.14);
+    box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.22);
+  }
+}
+
+.survey-facility-joint {
+  color: #f56c6c;
+  font: 900 24px/24px Arial, sans-serif;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+}
+.survey-facility-regulator {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  border-radius: 5px;
+  background: #1890ff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 /* ============ Survey Map:外层 wrapper ============ */
 /* 包住 #map 和编辑浮层,继承父容器 .map-panel 的全部空间
  *  - 必须 width/height: 100% 撑满,否则 #map 拿不到高度
@@ -338,6 +427,8 @@ html, body, #app {
   position: relative;
   width: 100%;
   height: 100%;
+  /* 编辑卡片从右侧滑入/滑出时不得撑开页面，否则横向滚动条会让地图宽度抖动。 */
+  overflow: hidden;
 }
 
 /* ============ Survey Map:模式光标 ============ */
@@ -590,14 +681,16 @@ html, body, #app {
   font-size: 13px;
 }
 
-/* 编辑浮层入场动效(右侧滑入) */
-.slide-right-enter-active,
-.slide-right-leave-active {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+/* 勘测编辑卡片使用独立过渡，避免与主地图信息卡片的 slide-right 样式互相覆盖。 */
+.survey-editor-slide-enter-active {
+  transition: transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1), opacity 0.25s ease;
 }
-.slide-right-enter-from,
-.slide-right-leave-to {
-  transform: translateX(20px);
+.survey-editor-slide-leave-active {
+  transition: transform 0.15s ease-in, opacity 0.15s ease-in;
+}
+.survey-editor-slide-enter-from,
+.survey-editor-slide-leave-to {
+  transform: translateX(calc(100% + 40px));
   opacity: 0;
 }
 
@@ -678,6 +771,11 @@ html, body, #app {
 .map-legend .legend-row.is-off:hover {
   opacity: 0.7;  /* hover 时稍微提亮,提示用户可点回去 */
 }
+.map-legend .legend-divider {
+  height: 1px;
+  margin: 6px 2px;
+  background: #dcdfe6;
+}
 
 /* 设施隐藏动效：当前只给控制单元和调压箱使用；其他设施直接 remove */
 .facility-fade-out {
@@ -756,6 +854,118 @@ html, body, #app {
   font-size: 12px;
   line-height: 1.6;
   pointer-events: none;
+}
+
+.survey-photo-input {
+  display: none;
+}
+.survey-photo-add-btn {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px dashed #7c3aed;
+  border-radius: 6px;
+  background: #f7f2ff;
+  color: #6d28d9;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+.survey-photo-add-btn:hover {
+  background: #efe5ff;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
+}
+.survey-photo-hint,
+.survey-photo-selection {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.survey-photo-selection {
+  overflow: hidden;
+  color: #606266;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amap-business-tip:has(.survey-point-hover-card) {
+  width: 340px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 10px;
+}
+.survey-point-hover-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  min-height: 148px;
+  background: #fff;
+}
+.survey-point-hover-main {
+  padding: 16px 18px;
+}
+.survey-point-hover-title {
+  color: #303133;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.survey-point-hover-type {
+  display: inline-flex;
+  margin-top: 7px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f0eaff;
+  color: #6d28d9;
+  font-size: 14px;
+  font-weight: 700;
+}
+.survey-point-hover-data {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 5px 10px;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.survey-point-hover-data span {
+  color: #909399;
+}
+.survey-point-hover-data strong {
+  color: #303133;
+  font-weight: 700;
+}
+.survey-point-hover-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ebeef5;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.survey-point-hover-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid #ebeef5;
+  background: linear-gradient(145deg, #f8f7ff, #f1efff);
+  color: #6d28d9;
+  font-size: 14px;
+  font-weight: 700;
+}
+.survey-point-hover-photo-icon {
+  margin-bottom: 6px;
+  font-size: 30px;
+  line-height: 1;
+}
+.survey-point-hover-photo small {
+  margin-top: 4px;
+  color: #a8a2b8;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 /* 纯悬停提示不得挡住 Marker/Polyline 的点击；带按钮的菜单不受此规则影响。 */
@@ -1103,7 +1313,7 @@ html, body, #app {
 }
 
 .unit-info-card .info-attrs {
-  margin-top: 23px;
+  margin-top: 34px;
   padding: 0 20px;
 }
 .unit-info-card .info-attrs-grid {
@@ -1146,6 +1356,9 @@ html, body, #app {
   margin-top: auto;
   padding: 16px 20px 20px;
   transform: translateY(-20px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 .unit-info-card .info-detail-btn {
   width: 100%;
@@ -1163,7 +1376,6 @@ html, body, #app {
   gap: 6px;
   transition: border-color 0.15s ease, background 0.15s ease, margin 0.2s ease;
   letter-spacing: 1px;
-  margin-top: -16px;
 }
 .unit-info-card .info-detail-btn:hover {
   background: #f0f8ff;
@@ -1175,6 +1387,245 @@ html, body, #app {
 }
 .unit-info-card .info-detail-btn:hover .info-detail-arrow {
   transform: translateX(3px);
+}
+
+/* ====== 主地图顶部：当前单元七项代表数据 + 返回 ====== */
+.unit-data-modules {
+  position: fixed;
+  top: 68px;
+  right: 16px;
+  left: 376px;
+  z-index: 998;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 10px;
+  pointer-events: none;
+  perspective: 1200px;
+}
+
+.unit-data-modules.visible {
+  pointer-events: auto;
+}
+
+.unit-data-module {
+  min-width: 0;
+  height: 76px;
+  padding: 10px;
+  border: 1px solid #dcdfe6;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(31, 58, 95, 0.12);
+  transform-origin: right center;
+  will-change: transform, opacity;
+}
+
+.unit-data-module.is-disabled {
+  background: rgba(245, 247, 250, 0.96);
+  color: #8c939d;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.unit-data-module.is-enabled {
+  border-color: #b3d8ff;
+  background: rgba(255, 255, 255, 0.97);
+  color: #337ecc;
+  cursor: pointer;
+  box-shadow: 0 9px 24px rgba(64, 158, 255, 0.16);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.unit-data-module.is-enabled:hover,
+.unit-data-module.is-enabled:focus-visible {
+  border-color: #409eff;
+  background: #f0f8ff;
+  box-shadow: 0 12px 28px rgba(64, 158, 255, 0.26);
+  transform: translateY(-3px);
+  outline: none;
+}
+
+.unit-data-module.is-enabled:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+.unit-data-module.is-return {
+  grid-column: 8;
+  border-color: #b3d8ff;
+  background: rgba(236, 245, 255, 0.97);
+  color: #1f5f9f;
+  cursor: pointer;
+  box-shadow: 0 9px 24px rgba(64, 158, 255, 0.2);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.unit-data-module.is-return:hover {
+  border-color: #409eff;
+  background: #d9ecff;
+  box-shadow: 0 11px 28px rgba(64, 158, 255, 0.3);
+}
+
+.unit-data-module-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex: 0 0 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e4e7ed;
+  color: #8c939d;
+}
+
+.unit-data-module.is-return .unit-data-module-icon {
+  background: #c6e2ff;
+  color: #337ecc;
+}
+
+.unit-data-module.is-enabled .unit-data-module-icon {
+  background: var(--module-soft);
+  color: var(--module-primary);
+}
+
+.unit-data-module-icon svg {
+  width: 25px;
+  height: 25px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.unit-data-module-icon svg .icon-secondary {
+  stroke: var(--module-secondary, currentColor);
+}
+
+.unit-data-module.is-disabled .unit-data-module-icon {
+  background: #e4e7ed;
+  color: #8c939d;
+}
+
+.unit-data-module.is-disabled .unit-data-module-icon svg .icon-secondary {
+  stroke: #8c939d;
+}
+
+.unit-data-module-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.unit-data-module-name,
+.unit-data-module-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-data-module-name {
+  color: #606b7a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.unit-data-module-value {
+  color: #1f3a5f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.unit-data-module.is-return .unit-data-module-name,
+.unit-data-module.is-enabled .unit-data-module-name {
+  color: #606b7a;
+}
+
+.unit-data-module.is-return .unit-data-module-value,
+.unit-data-module.is-enabled .unit-data-module-value {
+  color: #1f3a5f;
+}
+
+/* 从右侧牌堆依次甩开；离场延迟反转，按相反顺序收回牌堆。 */
+.unit-data-module.module-deck-enter-active {
+  transition:
+    transform 0.68s cubic-bezier(0.22, 1.25, 0.36, 1),
+    opacity 0.68s ease,
+    filter 0.68s ease;
+  transition-delay: var(--module-enter-delay);
+  pointer-events: none;
+}
+
+.unit-data-module.module-deck-leave-active {
+  transition:
+    transform 0.68s cubic-bezier(0.64, 0, 0.78, 0.75),
+    opacity 0.68s ease,
+    filter 0.68s ease;
+  transition-delay: var(--module-leave-delay);
+  pointer-events: none;
+}
+
+.module-deck-enter-from,
+.module-deck-leave-to {
+  transform:
+    translateX(var(--module-stack-x))
+    translateY(var(--module-stack-y))
+    rotate(var(--module-stack-rotate))
+    scale(0.92);
+  opacity: 0;
+  filter: blur(1px);
+}
+
+/* 入场与数据牌同时起步；离场在七张数据牌收拢完成的瞬间开始。 */
+.unit-data-module.is-return.module-deck-enter-active {
+  transition:
+    transform 0.42s cubic-bezier(0.22, 1.15, 0.36, 1),
+    opacity 0.42s ease;
+  transition-delay: 0ms;
+}
+
+.unit-data-module.is-return.module-deck-leave-active {
+  transition:
+    transform 0.28s cubic-bezier(0.64, 0, 0.78, 0.75),
+    opacity 0.28s ease;
+  /* 七张牌完整收拢约 932ms；进行到一半时返回牌开始向右退出。 */
+  transition-delay: 466ms;
+}
+
+.unit-data-module.is-return.module-deck-enter-from,
+.unit-data-module.is-return.module-deck-leave-to {
+  transform: translateX(calc(100% + 36px)) scale(0.94);
+  opacity: 0;
+  filter: none;
+}
+
+@media (max-width: 1450px) {
+  .unit-data-modules {
+    gap: 6px;
+  }
+  .unit-data-module {
+    height: 70px;
+    padding: 8px 7px;
+    gap: 6px;
+  }
+  .unit-data-module-icon {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+    border-radius: 8px;
+  }
+  .unit-data-module-icon svg {
+    width: 21px;
+    height: 21px;
+  }
+  .unit-data-module-name {
+    font-size: 11px;
+  }
+  .unit-data-module-value {
+    font-size: 12px;
+  }
 }
 
 @media (max-width: 768px) {

@@ -1,5 +1,5 @@
 /**
- * Mock 数据 — 与讯腾报价的 9 项检测对应
+ * Mock 数据 — 与 7 项现场检测对应
  * 后端真实接口实现后，把 .env 的 VITE_USE_MOCK 改为 false 即可切换
  */
 import { INSPECTION_ITEMS } from '@/types/items'
@@ -78,26 +78,12 @@ export const MOCK_POINTS: InspectionPoint[] = [
 const ITEM_CODES: InspectionItemCode[] = INSPECTION_ITEMS.map((i) => i.code)
 
 /**
- * 为南海家园七里第一个控制单元（FSKZ755906）构造 9 项检测演示数据：
- *  - 7 项已合格
- *  - 1 项进行中
- *  - 1 项异常（防腐层破损 — 这是真实项目里最常见的现场情况）
- * 进度：7 + 1（异常也算）= 8/9 ≈ 0.89，状态 in_progress
+ * 为南海家园七里第一个控制单元（FSKZ755906）构造 7 项检测演示数据，
+ * 其中防腐层检测异常，其余 6 项合格，因此完成进度为 6/7。
  *
  * 注：unit_id=1 对应 facilities.ts 里解析的第一个真实低压制单元。
  */
 const nhjyRecords: InspectionRecord[] = [
-  {
-    id: 1001, unit_id: 1, item_code: 'PLAN_OUTLINE',
-    item_name: INSPECTION_ITEMS.find((i) => i.code === 'PLAN_OUTLINE')!.name,
-    work_hours: 0.25, personnel_count: 1, personnel_level: '高级',
-    inspector: '王工（高级工程师）',
-    inspection_date: daysAgo(15),
-    status: 'passed',
-    result_summary: '《南海家园七里绝缘改造方案大纲 v1.0》已编制完成，包含 9 项检测实施计划',
-    result_data: { plan_version: 'v1.0', deadline: '2026-07-15' },
-    created_at: daysAgo(15), updated_at: daysAgo(15),
-  },
   {
     id: 1002, unit_id: 1, item_code: 'JOINT_VERIFY',
     item_name: INSPECTION_ITEMS.find((i) => i.code === 'JOINT_VERIFY')!.name,
@@ -192,12 +178,12 @@ const nhjyRecords: InspectionRecord[] = [
 
 /**
  * 给不同 unit_id 构造不同状态的演示 records，便于对比视觉差异：
- *   id=1 (FSKZ755906): 8/9 = 89% in_progress（含 1 项异常 + 1 项进行中）
- *   id=2 (FSKZ755914): 9/9 = 100% completed
- *   id=3 (FSKZ755912): 4 passed + 1 exception = 5/9 = 56% exception
- *   id=4 (FSKZ755911): 3 passed = 3/9 = 33% in_progress
- *   id=5 (FSKZ755910): 1 exception = 1/9 = 11% in_progress
- *   id=6+: 0/9 pending（无 records）
+ *   id=1: 6/7，另有 1 项异常
+ *   id=2: 7/7 全部合格
+ *   id=3: 4 项合格 + 1 项异常
+ *   id=4: 6 项合格 + 1 项待开始
+ *   id=5: 1 项异常
+ *   id=6+: 无记录
  */
 const ITEM_CODES_LIST: InspectionItemCode[] = INSPECTION_ITEMS.map((i) => i.code)
 
@@ -205,7 +191,7 @@ function makeDemoRecords(unitId: number, idBase: number, statuses: RecordStatus[
   return ITEM_CODES_LIST.map((code, idx) => {
     const item = INSPECTION_ITEMS.find((i) => i.code === code)!
     const status: RecordStatus = statuses[idx] ?? 'pending'
-    const isDone = status === 'passed' || status === 'exception'
+    const hasResult = status === 'passed' || status === 'exception'
     return {
       id: idBase + idx,
       unit_id: unitId,
@@ -217,7 +203,7 @@ function makeDemoRecords(unitId: number, idBase: number, statuses: RecordStatus[
       inspector: '演示人员',
       inspection_date: daysAgo(7 - idx),
       status,
-      result_summary: status === 'exception' ? '检测发现异常' : (isDone ? '检测合格' : ''),
+      result_summary: status === 'exception' ? '检测发现异常' : (hasResult ? '检测合格' : ''),
       result_data: {},
       created_at: daysAgo(7 - idx),
       updated_at: daysAgo(7 - idx),
@@ -226,15 +212,10 @@ function makeDemoRecords(unitId: number, idBase: number, statuses: RecordStatus[
 }
 
 const demoRecords: InspectionRecord[] = [
-  // id=2: 全 9 项 passed = 100% completed
-  ...makeDemoRecords(2, 2000, ['passed','passed','passed','passed','passed','passed','passed','passed','passed']),
-  // id=3: 4 passed + 1 exception = 5/9 = 56% exception
-  ...makeDemoRecords(3, 3000, ['passed','passed','passed','passed','exception','pending','pending','pending','pending']),
-  // id=4 (FSKZ755902): 8 passed + 1 pending = 8/9 ≈ 89% in_progress
-  // （临时调高进度，用于测试进度条 > 80% 橙色效果）
-  ...makeDemoRecords(4, 4000, ['passed','passed','passed','passed','passed','passed','passed','passed','pending']),
-  // id=5: 1 exception = 1/9 = 11% in_progress
-  ...makeDemoRecords(5, 5000, ['exception','pending','pending','pending','pending','pending','pending','pending','pending']),
+  ...makeDemoRecords(2, 2000, ['passed','passed','passed','passed','passed','passed','passed']),
+  ...makeDemoRecords(3, 3000, ['passed','passed','passed','passed','exception','pending','pending']),
+  ...makeDemoRecords(4, 4000, ['passed','passed','passed','passed','passed','passed','pending']),
+  ...makeDemoRecords(5, 5000, ['exception','pending','pending','pending','pending','pending','pending']),
 ]
 
 const allPassedStatuses: RecordStatus[] = ITEM_CODES_LIST.map(() => 'passed')
@@ -269,7 +250,7 @@ function loadPersistedRecords(): InspectionRecord[] | null {
     const parsed = JSON.parse(value) as InspectionRecord[] | PersistedMockRecords
     if (!Array.isArray(parsed)) {
       return parsed.version === MOCK_RECORDS_STORAGE_VERSION && Array.isArray(parsed.records)
-        ? parsed.records
+        ? parsed.records.filter((record) => ITEM_CODES.includes(record.item_code))
         : null
     }
 
@@ -288,7 +269,7 @@ function loadPersistedRecords(): InspectionRecord[] | null {
       version: MOCK_RECORDS_STORAGE_VERSION,
       records: migrated,
     }))
-    return migrated
+    return migrated.filter((record) => ITEM_CODES.includes(record.item_code))
   } catch {
     return null
   }

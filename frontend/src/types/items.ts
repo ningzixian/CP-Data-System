@@ -1,22 +1,13 @@
 /**
- * 9 项检测项的静态定义
+ * 7 项现场检测的静态定义
  * 价格数据来自讯腾报价.xlsx，编码与后端 InspectionRecord.ITEM_CODES 保持一致
  */
 import type { InspectionItemDef, InspectionItemCode } from '@/types/models'
 
 export const INSPECTION_ITEMS: InspectionItemDef[] = [
   {
-    code: 'PLAN_OUTLINE',
-    name: '① 编制方案大纲',
-    pricePerKm: 450,
-    fields: [
-      { key: 'plan_version', label: '方案版本' },
-      { key: 'deadline', label: '计划完成日期' },
-    ],
-  },
-  {
     code: 'JOINT_VERIFY',
-    name: '② 绝缘接头位置和绝缘性能复核',
+    name: '① 绝缘接头位置和绝缘性能复核',
     pricePerKm: 12500,
     fields: [
       { key: 'joint_count', label: '接头数量' },
@@ -26,7 +17,7 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'SOIL_RESISTIVITY',
-    name: '③ 土壤电阻率检测',
+    name: '② 土壤电阻率检测',
     pricePerKm: 1350,
     fields: [
       { key: 'resistivity', label: '土壤电阻率(Ω·m)' },
@@ -36,7 +27,7 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'DC_STRAY_CURRENT',
-    name: '④ 直流杂散电流检测',
+    name: '③ 直流杂散电流检测',
     pricePerKm: 1700,
     fields: [
       { key: 'current_density', label: '电流密度(μA/cm²)' },
@@ -45,7 +36,7 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'COATING_DETECT',
-    name: '⑤ 防腐层非开挖检测',
+    name: '④ 防腐层非开挖检测',
     pricePerKm: 750,
     fields: [
       { key: 'coating_resistivity', label: '面电阻率(Ω·m²)' },
@@ -56,7 +47,7 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'PIPE_GROUND_POTENTIAL',
-    name: '⑥ 管地腐蚀电位检测',
+    name: '⑤ 管地腐蚀电位检测',
     pricePerKm: 3000,
     fields: [
       { key: 'on_potential', label: '通电电位(V)' },
@@ -66,7 +57,7 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'ELECTRIC_CONTINUITY',
-    name: '⑦ 管道电联通性检测',
+    name: '⑥ 管道电联通性检测',
     pricePerKm: 4500,
     fields: [
       { key: 'is_connected', label: '是否搭接' },
@@ -76,21 +67,12 @@ export const INSPECTION_ITEMS: InspectionItemDef[] = [
   },
   {
     code: 'INLET_PARAM',
-    name: '⑧ 引入口参数测量',
+    name: '⑦ 引入口参数测量',
     pricePerKm: 350,
     fields: [
       { key: 'diameter', label: '管径(mm)' },
       { key: 'out_of_roundness', label: '不圆度(%)' },
       { key: 'wall_thickness', label: '剩余壁厚(mm)' },
-    ],
-  },
-  {
-    code: 'DATA_ENTRY',
-    name: '⑨ 检测数据填报',
-    pricePerKm: 300,
-    fields: [
-      { key: 'data_volume', label: '数据条数' },
-      { key: 'system_version', label: '腐控系统版本' },
     ],
   },
 ]

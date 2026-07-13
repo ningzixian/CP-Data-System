@@ -8,6 +8,7 @@
  *  - 撤销/重做已就绪
  */
 import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useCpStore } from '@/stores/cp'
 import { useSurveyStore } from '@/stores/survey'
 import SurveyMapView from '@/components/SurveyMapView.vue'
@@ -15,6 +16,7 @@ import type { SurveyPoint, SurveyPointType, SurveyEndpointId } from '@/types/sur
 
 const store = useCpStore()
 const survey = useSurveyStore()
+const mapRef = ref<InstanceType<typeof SurveyMapView> | null>(null)
 
 // ========== 当前激活的小区 ==========
 const SURVEY_COMMUNITY = '南海家园三里'
@@ -28,19 +30,23 @@ const surveyPipes = computed(() => {
 })
 const surveyInlets = computed(() => {
   const allInlets = store.facilities?.inlets ?? []
-  return allInlets.filter((i) => {
-    if (i.unit_id === undefined) return false
-    const unit = store.units.find((u) => u.id === i.unit_id)
-    return unit?.address?.startsWith(SURVEY_COMMUNITY) ?? false
-  })
+  return allInlets.filter((inlet) => inlet.community === SURVEY_COMMUNITY)
 })
 const surveyUnits = computed(() =>
   store.units.filter((u) => (u.address ?? '').startsWith(SURVEY_COMMUNITY)),
+)
+const surveyJoints = computed(() =>
+  (store.facilities?.joints ?? []).filter((joint) => joint.community === SURVEY_COMMUNITY),
+)
+const surveyRegulators = computed(() =>
+  (store.facilities?.regulators ?? []).filter((regulator) => regulator.community === SURVEY_COMMUNITY),
 )
 const surveyStats = computed(() => ({
   unitCount: surveyUnits.value.length,
   pipeCount: surveyPipes.value.length,
   inletCount: surveyInlets.value.length,
+  jointCount: surveyJoints.value.length,
+  regulatorCount: surveyRegulators.value.length,
   pointCount: survey.points.length,
   lineCount: survey.lines.length,
 }))
@@ -51,6 +57,7 @@ const mode = ref<'view' | 'add-point' | 'connect'>('view')
 const editingPointId = ref<string | null>(null)
 /** 列表里选中的点位(高亮,不一定要编辑) */
 const selectedPointId = ref<string | null>(null)
+const communityExpanded = ref(true)
 
 // ========== 工具栏回调 ==========
 function onUndo() { survey.undo() }
@@ -75,8 +82,13 @@ function onCreatePoint(payload: { lat: number; lng: number; type: SurveyPointTyp
 
 function onPointClick(id: string) {
   // view 模式点击 marker → 进入编辑
+  mapRef.value?.focusPoint(id)
   selectedPointId.value = id
   editingPointId.value = id
+}
+
+function onListPointClick(id: string) {
+  onPointClick(id)
 }
 
 function onUpdatePoint(payload: { id: string; patch: Partial<SurveyPoint> }) {
@@ -95,7 +107,8 @@ function onCloseEditor() {
  *  - store.addLine 内部会 push history + 防重复
  */
 function onCreateLine(payload: { fromId: SurveyEndpointId; toId: SurveyEndpointId }) {
-  survey.addLine(payload)
+  const created = survey.addLine(payload)
+  if (!created) ElMessage.warning('这两个点之间已经存在管线，不能重复连线')
 }
 
 /** 点击管线 → 弹菜单 → 用户点删除按钮才触发 */
@@ -106,6 +119,9 @@ function onRemoveLine(id: string) {
 // ========== 图例显隐 ==========
 const pipeVisible = ref(true)
 const inletVisible = ref(true)
+const unitVisible = ref(true)
+const jointVisible = ref(true)
+const regulatorVisible = ref(true)
 const surveyPointVisible = ref(true)
 const surveyLineVisible = ref(true)
 
@@ -120,15 +136,8 @@ onMounted(async () => {
 
 <template>
   <div class="main-content">
-    <!-- 左侧菜单栏:小区名 + 工具栏 + 点位列表 -->
-    <div class="side-panel">
-      <div class="survey-header">
-        <div class="survey-header-name">{{ SURVEY_COMMUNITY }}</div>
-        <div class="survey-header-meta">
-          {{ surveyStats.unitCount }} 单元 ｜ {{ surveyStats.pipeCount }} 管线 ｜ {{ surveyStats.inletCount }} 引入
-        </div>
-      </div>
-
+    <!-- 左侧菜单栏:工具栏 + 可折叠小区点位列表 -->
+    <div class="side-panel survey-side-panel">
       <!-- 工具栏:模式 + 撤销/重做 -->
       <div class="survey-toolbar">
         <div class="survey-toolbar-row">
@@ -169,8 +178,22 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 点位列表 -->
-      <div class="survey-list">
+      <!-- 小区折叠菜单：当前所有点位归入南海家园三里 -->
+      <button
+        type="button"
+        class="survey-community-toggle"
+        :class="{ expanded: communityExpanded }"
+        :aria-expanded="communityExpanded"
+        @click="communityExpanded = !communityExpanded"
+      >
+        <span class="survey-community-arrow">▶</span>
+        <span class="survey-community-title">{{ SURVEY_COMMUNITY }}</span>
+        <span class="survey-community-meta">
+          {{ surveyStats.unitCount }} 单元 ｜ {{ surveyStats.pipeCount }} 管线 ｜ {{ surveyStats.inletCount }} 引入
+        </span>
+      </button>
+      <div v-show="communityExpanded" class="survey-community-content">
+        <div class="survey-list">
         <div class="survey-list-header">
           勘测点位（{{ survey.points.length }}）
         </div>
@@ -184,7 +207,7 @@ onMounted(async () => {
           class="survey-point-row"
           :class="{ active: selectedPointId === p.id }"
           :data-point-id="p.id"
-          @click="onPointClick(p.id)"
+          @click="onListPointClick(p.id)"
         >
           <span
             class="survey-point-type-dot"
@@ -193,8 +216,8 @@ onMounted(async () => {
           <span class="survey-point-id">{{ p.id }}</span>
           <span class="survey-point-type">
             {{ p.type === 'tee' ? '三通' : p.type === 'elbow' ? '弯头' : '普通' }}
-            <template v-if="p.type !== 'straight'">·{{ p.rotation }}°</template>
           </span>
+        </div>
         </div>
       </div>
     </div>
@@ -202,12 +225,19 @@ onMounted(async () => {
     <!-- 右侧:地图 + 左下角图例 -->
     <div class="map-panel">
       <SurveyMapView
+        ref="mapRef"
         :pipes="surveyPipes"
         :inlets="surveyInlets"
+        :units="surveyUnits"
+        :joints="surveyJoints"
+        :regulators="surveyRegulators"
         :survey-points="survey.points"
         :survey-lines="survey.lines"
         :visible="pipeVisible"
         :inlets-visible="inletVisible"
+        :units-visible="unitVisible"
+        :joints-visible="jointVisible"
+        :regulators-visible="regulatorVisible"
         :survey-points-visible="surveyPointVisible"
         :survey-lines-visible="surveyLineVisible"
         :mode="mode"
@@ -225,10 +255,14 @@ onMounted(async () => {
         <div class="legend-section legend-section--readonly">
           <div><span class="dot" style="background:#67c23a"></span>燃气管线</div>
           <div><span class="dot" style="background:#909399"></span>引入口</div>
-          <div><span class="dot" style="background:#f56c6c"></span>勘测管线</div>
+          <div><span class="dot" style="background:#7c3aed"></span>勘测管线</div>
           <div><span class="dot" style="background:#e6a23c"></span>勘测点位</div>
         </div>
         <div class="legend-section legend-section--toggle">
+          <label class="legend-row" :class="{ 'is-off': !unitVisible }">
+            <input type="checkbox" v-model="unitVisible" />
+            <span class="legend-label">控制单元（{{ surveyStats.unitCount }}）</span>
+          </label>
           <label class="legend-row" :class="{ 'is-off': !pipeVisible }">
             <input type="checkbox" v-model="pipeVisible" />
             <span class="legend-label">燃气管线（{{ surveyStats.pipeCount }}）</span>
@@ -237,6 +271,15 @@ onMounted(async () => {
             <input type="checkbox" v-model="inletVisible" />
             <span class="legend-label">引入口（{{ surveyStats.inletCount }}）</span>
           </label>
+          <label class="legend-row" :class="{ 'is-off': !jointVisible }">
+            <input type="checkbox" v-model="jointVisible" />
+            <span class="legend-label">绝缘接头（{{ surveyStats.jointCount }}）</span>
+          </label>
+          <label class="legend-row" :class="{ 'is-off': !regulatorVisible }">
+            <input type="checkbox" v-model="regulatorVisible" />
+            <span class="legend-label">调压箱（{{ surveyStats.regulatorCount }}）</span>
+          </label>
+          <div class="legend-divider" aria-hidden="true"></div>
           <label class="legend-row" :class="{ 'is-off': !surveyPointVisible }">
             <input type="checkbox" v-model="surveyPointVisible" />
             <span class="legend-label">勘测点位（{{ surveyStats.pointCount }}）</span>

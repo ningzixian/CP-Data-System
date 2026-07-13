@@ -3,16 +3,23 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { loadAMap } from '@/map/amap-loader'
 import { escapeHtml as e } from '@/utils/html'
-import type { CsvInlet, CsvPipe } from '@/utils/facilities'
+import type { CsvInlet, CsvJoint, CsvPipe, CsvRegulator } from '@/utils/facilities'
+import type { CorrosionUnit } from '@/types/models'
 import type { SurveyEndpointId, SurveyLine, SurveyPoint, SurveyPointType } from '@/types/survey'
 
 const props = defineProps<{
   pipes: CsvPipe[]
   inlets: CsvInlet[]
+  units: CorrosionUnit[]
+  joints: CsvJoint[]
+  regulators: CsvRegulator[]
   surveyPoints: SurveyPoint[]
   surveyLines: SurveyLine[]
   visible: boolean
   inletsVisible: boolean
+  unitsVisible: boolean
+  jointsVisible: boolean
+  regulatorsVisible: boolean
   surveyPointsVisible: boolean
   surveyLinesVisible: boolean
   mode: 'view' | 'add-point' | 'connect'
@@ -36,17 +43,26 @@ let map: any = null
 let tipWindow: any = null
 let menuWindow: any = null
 
-type LayerKey = 'pipe' | 'inlet' | 'point' | 'line' | 'arrow' | 'temp'
-const layers: Record<LayerKey, any[]> = { pipe: [], inlet: [], point: [], line: [], arrow: [], temp: [] }
+type LayerKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet' | 'point' | 'line' | 'arrow' | 'temp'
+const layers: Record<LayerKey, any[]> = {
+  unit: [], pipe: [], joint: [], regulator: [], inlet: [], point: [], line: [], arrow: [], temp: [],
+}
 const pointMarkerMap = new Map<string, any>()
+const unitPolygonMap = new Map<number, any>()
+let selectedUnitId: number | null = null
+type SelectableFacilityKind = 'pipe' | 'joint' | 'regulator' | 'inlet'
+let selectedFacility: { kind: SelectableFacilityKind; overlay: any; element?: HTMLElement } | null = null
+let suppressNextMapClear = false
 
 let connectPendingFrom: SurveyEndpointId | null = null
 let connectPendingPosition: [number, number] | null = null
 let connectTempLine: any = null
 const SNAP_PX = 50
+const FACILITY_FOCUS_ZOOM = 19
 
 const PIPE_STYLE = { strokeColor: '#67c23a', strokeWeight: 3, strokeOpacity: 0.75, lineCap: 'round', lineJoin: 'round', zIndex: 300 }
-const SURVEY_LINE_STYLE = { strokeColor: '#f56c6c', strokeWeight: 3, strokeOpacity: 0.9, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
+const PIPE_ACTIVE_STYLE = { strokeColor: '#8B4513', strokeWeight: 6, strokeOpacity: 1, zIndex: 810 }
+const SURVEY_LINE_STYLE = { strokeColor: '#7c3aed', strokeWeight: 4, strokeOpacity: 0.95, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
 const TEMP_LINE_STYLE = { strokeColor: '#409eff', strokeWeight: 3, strokeOpacity: 0.85, strokeStyle: 'dashed', strokeDasharray: [4, 4], zIndex: 700 }
 
 function contentElement(className: string, html: string) {
@@ -66,6 +82,7 @@ function createMarker(position: [number, number], className: string, html: strin
   content.addEventListener('touchstart', stopMapDrag, { passive: true })
   const item = new AMapApi.Marker({ position, content, anchor: 'center', zIndex, clickable, bubble: false })
   ;(item as any).__content = content
+  ;(item as any).__baseZIndex = zIndex
   return item
 }
 
@@ -84,7 +101,7 @@ function pointIconHtml(point: SurveyPoint) {
 }
 
 function arrowHtml(angle: number) {
-  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="14" height="14" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#f56c6c" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
+  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="14" height="14" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#7c3aed" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
 }
 
 function addLayer(kind: LayerKey, overlay: any) {
@@ -156,10 +173,150 @@ function renderPipes() {
   props.pipes.forEach((pipe) => {
     if (pipe.coords.length < 2) return
     const line = new AMapApi.Polyline({ path: pipe.coords, ...PIPE_STYLE })
-    bindTip(line, `<b>${e(pipe.pipeno || `#${pipe.fid}`)}</b><br>管材：${e(pipe.material || '—')} | 外径：${e(pipe.diametero || '—')}mm<br>壁厚：${e(pipe.thickness || '—')}mm | 长度：${e(pipe.length || '—')}m<br>压力：${e(pipe.pressured || '—')}`)
+    bindSelectableFacility('pipe', line, `<b>${e(pipe.pipeno || `#${pipe.fid}`)}</b><br>管材：${e(pipe.material || '—')} | 外径：${e(pipe.diametero || '—')}mm<br>壁厚：${e(pipe.thickness || '—')}mm | 长度：${e(pipe.length || '—')}m<br>压力：${e(pipe.pressured || '—')}`)
     addLayer('pipe', line)
   })
   toggleLayer('pipe', props.visible)
+}
+
+function clearFacilitySelection() {
+  if (!selectedFacility) return
+  if (selectedFacility.kind === 'pipe') selectedFacility.overlay.setOptions(PIPE_STYLE)
+  else {
+    selectedFacility.element?.classList.remove('selected', 'hovered')
+    selectedFacility.overlay.setzIndex?.((selectedFacility.overlay as any).__baseZIndex ?? 500)
+  }
+  selectedFacility = null
+}
+
+function focusFacility(overlay: any) {
+  const position = overlay.getPosition?.() ?? overlay.getBounds?.()?.getCenter?.()
+  if (position) map.setZoomAndCenter(FACILITY_FOCUS_ZOOM, position, false, 500)
+}
+
+function preventImmediateMapClear() {
+  suppressNextMapClear = true
+  window.setTimeout(() => { suppressNextMapClear = false }, 0)
+}
+
+function bindSelectableFacility(kind: SelectableFacilityKind, overlay: any, html: string) {
+  const element = (overlay as any).__content as HTMLElement | undefined
+  overlay.on('mouseover', (event: any) => {
+    if (kind === 'pipe') overlay.setOptions(PIPE_ACTIVE_STYLE)
+    else {
+      element?.classList.add('hovered')
+      overlay.setzIndex?.(810)
+    }
+    const pos = event.lnglat ?? overlay.getPosition?.() ?? overlay.getBounds?.()?.getCenter?.()
+    if (pos) openTip([pos.getLng(), pos.getLat()], html)
+  })
+  overlay.on('mouseout', () => {
+    if (selectedFacility?.overlay !== overlay) {
+      if (kind === 'pipe') overlay.setOptions(PIPE_STYLE)
+      else {
+        element?.classList.remove('hovered')
+        overlay.setzIndex?.((overlay as any).__baseZIndex ?? 500)
+      }
+    }
+    tipWindow?.close()
+  })
+  const select = () => {
+    if (props.mode !== 'view') return
+    preventImmediateMapClear()
+    if (selectedFacility?.overlay === overlay) {
+      clearFacilitySelection()
+      return
+    }
+    clearFacilitySelection()
+    selectedUnitId = null
+    syncUnitSelection()
+    if (kind === 'pipe') overlay.setOptions(PIPE_ACTIVE_STYLE)
+    else {
+      element?.classList.add('selected')
+      overlay.setzIndex?.(820)
+    }
+    selectedFacility = { kind, overlay, element }
+    focusFacility(overlay)
+  }
+  // 自定义 Marker 的 DOM 事件可能不会继续触发高德 Marker.click，直接绑定内容节点。
+  if (element) {
+    element.addEventListener('click', (event) => {
+      event.stopPropagation()
+      select()
+    })
+  } else {
+    overlay.on('click', select)
+  }
+}
+
+const UNIT_DEFAULT_STYLE = { strokeColor: '#67c23a', strokeWeight: 2, strokeOpacity: 0.9, fillColor: '#67c23a', fillOpacity: 0.12, strokeStyle: 'dashed', zIndex: 300 }
+const UNIT_HOVER_STYLE = { strokeColor: '#409eff', strokeWeight: 3, strokeOpacity: 1, fillColor: '#409eff', fillOpacity: 0.25, strokeStyle: 'solid', zIndex: 300 }
+const UNIT_SELECTED_STYLE = { strokeColor: '#7c3aed', strokeWeight: 3, strokeOpacity: 1, fillColor: '#7c3aed', fillOpacity: 0.28, strokeStyle: 'solid', zIndex: 300 }
+
+function syncUnitSelection() {
+  unitPolygonMap.forEach((polygon, id) => {
+    polygon.setOptions(id === selectedUnitId ? UNIT_SELECTED_STYLE : UNIT_DEFAULT_STYLE)
+  })
+}
+
+function renderUnits() {
+  if (!map) return
+  clearLayer('unit')
+  unitPolygonMap.clear()
+  props.units.forEach((unit) => {
+    const path = unit.polyline?.map(([lat, lng]) => [lng, lat] as [number, number]) ?? []
+    if (path.length < 3) return
+    const polygon = new AMapApi.Polygon({ path, ...UNIT_DEFAULT_STYLE, bubble: true })
+    polygon.on('mouseover', () => {
+      if (selectedUnitId !== unit.id) polygon.setOptions(UNIT_HOVER_STYLE)
+    })
+    polygon.on('mouseout', syncUnitSelection)
+    polygon.on('click', () => {
+      if (props.mode !== 'view') return
+      preventImmediateMapClear()
+      clearFacilitySelection()
+      selectedUnitId = selectedUnitId === unit.id ? null : unit.id
+      syncUnitSelection()
+      if (selectedUnitId === unit.id) focusFacility(polygon)
+    })
+    bindTip(polygon, `<b>控制单元 ${e(unit.name)}</b><br>${e(unit.address || '')}`)
+    unitPolygonMap.set(unit.id, polygon)
+    addLayer('unit', polygon)
+  })
+  syncUnitSelection()
+  toggleLayer('unit', props.unitsVisible)
+}
+
+function renderJoints() {
+  if (!map) return
+  clearLayer('joint')
+  props.joints.forEach((joint) => {
+    const item = createMarker(
+      [joint.lng, joint.lat],
+      'joint-marker amap-facility-marker',
+      '<div class="facility-anim"><div style="color:#f56c6c;font-size:22px;font-weight:900;line-height:22px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;font-family:Arial">✕</div></div>',
+      520,
+    )
+    bindSelectableFacility('joint', item, `<b>绝缘接头 ${e(joint.ecode)}</b><br>压力：${e(joint.pressured || '—')}<br>管号：${e(joint.pipeno || '—')}`)
+    addLayer('joint', item)
+  })
+  toggleLayer('joint', props.jointsVisible)
+}
+
+function renderRegulators() {
+  if (!map) return
+  clearLayer('regulator')
+  props.regulators.forEach((regulator) => {
+    const item = createMarker(
+      [regulator.lng, regulator.lat],
+      'regulator-marker amap-facility-marker',
+      '<div class="facility-anim"><div style="background:#1890ff;color:#fff;border-radius:4px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-weight:700;font-size:14px">调</div></div>',
+      510,
+    )
+    bindSelectableFacility('regulator', item, `<b>调压箱 ${e(regulator.name || regulator.ecode)}</b><br>编码：${e(regulator.ecode)}<br>压力：${e(regulator.pressured || '—')}`)
+    addLayer('regulator', item)
+  })
+  toggleLayer('regulator', props.regulatorsVisible)
 }
 
 function handleEndpointClick(id: SurveyEndpointId, position: [number, number]) {
@@ -175,12 +332,12 @@ function renderInlets() {
   if (!map) return
   clearLayer('inlet')
   props.inlets.forEach((inlet) => {
-    const item = createMarker([inlet.lng, inlet.lat], 'survey-inlet-marker', '<div style="background:#909399;color:#fff;border-radius:50%;width:14px;height:14px;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>', 420)
+    const item = createMarker([inlet.lng, inlet.lat], 'inlet-marker amap-facility-marker survey-inlet-marker', '<div class="facility-anim"><div style="background:#909399;color:#fff;border-radius:50%;width:14px;height:14px;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div></div>', 500)
     ;((item as any).__content as HTMLElement).addEventListener('click', (event) => {
       event.stopPropagation()
       handleEndpointClick(`inlet:${inlet.fid}`, [inlet.lng, inlet.lat])
     })
-    bindTip(item, `<b>引入口 ${e(inlet.ecode)}</b><br>压力：${e(inlet.pressured || '—')}<br>管号：${e(inlet.pipeno || '—')}`)
+    bindSelectableFacility('inlet', item, `<b>引入口 ${e(inlet.ecode)}</b><br>压力：${e(inlet.pressured || '—')}<br>管号：${e(inlet.pipeno || '—')}`)
     addLayer('inlet', item)
   })
   toggleLayer('inlet', props.inletsVisible)
@@ -199,7 +356,7 @@ function renderSurveyPoints() {
       else emit('point-click', point.id)
     })
     const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : '普通点位'
-    bindTip(item, `<b>${e(point.id)}</b> (${type}${point.type !== 'straight' ? ` ${point.rotation}°` : ''})<br>${point.depth !== undefined ? `埋深：${e(point.depth)} m<br>` : ''}${point.current !== undefined ? `电流：${e(point.current)}<br>` : ''}${point.note ? `备注：${e(point.note)}` : ''}`)
+    bindTip(item, `<div class="survey-point-hover-card"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? e(point.current) : '未记录'}</strong></div>${point.note ? `<div class="survey-point-hover-note">${e(point.note)}</div>` : ''}</div><div class="survey-point-hover-photo"><div class="survey-point-hover-photo-icon">▧</div><span>照片留痕</span><small>暂无照片</small></div></div>`)
     addLayer('point', item)
     pointMarkerMap.set(point.id, item)
   })
@@ -268,7 +425,7 @@ function onMapPointerDownCapture(event: PointerEvent) {
   if (props.mode !== 'view' || event.button !== 0) return
   const target = event.target as HTMLElement
   // 点位和引入口优先处理自身点击，编辑面板/弹窗也不能被线命中逻辑截获。
-  if (target.closest('.survey-point-marker, .survey-inlet-marker, .survey-editor-panel, .amap-info-window')) return
+  if (target.closest('.survey-point-marker, .survey-inlet-marker, .joint-marker, .regulator-marker, .survey-editor-panel, .amap-info-window')) return
   const hit = findLineAtClientPoint(event.clientX, event.clientY)
   if (!hit) return
   stopLinePointerEvent(event)
@@ -323,7 +480,7 @@ function renderSurveyLines() {
     // AMap Canvas 对 3px 细线的命中范围较小，增加透明宽热区提升点击可用性。
     const hitArea = new AMapApi.Polyline({
       path: [from, to],
-      strokeColor: '#f56c6c',
+      strokeColor: '#7c3aed',
       strokeWeight: 16,
       strokeOpacity: 0.01,
       zIndex: 510,
@@ -378,11 +535,17 @@ function showAddMenu(position: [number, number]) {
 function handleMapClick(event: any) {
   // 自定义 Marker 的 DOM 点击也会到达地图；端点由 Marker 自己处理，这里必须跳过。
   const target = event.originEvent?.target as HTMLElement | undefined
-  if (target?.closest?.('.survey-point-marker, .survey-inlet-marker')) return
+  if (target?.closest?.('.survey-point-marker, .survey-inlet-marker, .joint-marker, .regulator-marker')) return
+  if (props.mode === 'view' && suppressNextMapClear) return
   const position: [number, number] = [event.lnglat.getLng(), event.lnglat.getLat()]
   if (props.mode === 'add-point') showAddMenu(position)
   else if (props.mode === 'connect') handleConnectMapClick(position)
-  else menuWindow?.close()
+  else {
+    menuWindow?.close()
+    clearFacilitySelection()
+    selectedUnitId = null
+    syncUnitSelection()
+  }
 }
 
 function handleMouseMove(event: any) {
@@ -412,16 +575,46 @@ function onDocumentClick(event: MouseEvent) {
 
 function fitToAll() {
   if (!map) return
-  const candidates = [...layers.pipe, ...layers.point, ...layers.line]
+  const candidates = [...layers.unit, ...layers.pipe, ...layers.point, ...layers.line]
   if (!candidates.length) return
   map.setFitView(candidates, false, [60, 60, 60, 60], 20)
   window.setTimeout(() => { if (map && map.getZoom() < 18) map.setZoom(18) }, 300)
 }
 
+function markFocusedPoint(id: string | null) {
+  pointMarkerMap.forEach((marker, pointId) => {
+    const element = (marker as any).__content as HTMLElement | undefined
+    element?.classList.toggle('is-focused', pointId === id)
+  })
+}
+
+function focusPoint(id: string) {
+  const point = props.surveyPoints.find((item) => item.id === id)
+  if (!map || !point) return
+  markFocusedPoint(id)
+  // 容器已裁剪卡片进出场的横向溢出，可以安全使用平滑定位动画。
+  map.setZoomAndCenter(20, [point.lng, point.lat], false, 500)
+}
+
+defineExpose({ focusPoint })
+
 const editingPoint = computed(() => props.editingPointId ? props.surveyPoints.find((point) => point.id === props.editingPointId) ?? null : null)
 const editForm = reactive<{ type: SurveyPointType; rotation: number; depth: number | null; current: number | null; note: string }>({ type: 'straight', rotation: 0, depth: null, current: null, note: '' })
+const photoInputRef = ref<HTMLInputElement | null>(null)
+const selectedPhotoNames = ref<string[]>([])
+
+function choosePhotos() {
+  photoInputRef.value?.click()
+}
+
+function onPhotosSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectedPhotoNames.value = Array.from(input.files ?? []).map((file) => file.name)
+}
 
 watch(() => props.editingPointId, (id) => {
+  markFocusedPoint(id)
+  selectedPhotoNames.value = []
   const point = id ? props.surveyPoints.find((item) => item.id === id) : null
   if (!point) return
   editForm.type = point.type
@@ -468,7 +661,10 @@ onMounted(async () => {
     mapRef.value?.addEventListener('click', onMapClickCapture, true)
     document.addEventListener('click', onDocumentClick)
     window.addEventListener('blur', restoreMapDrag)
+    renderUnits()
     renderPipes()
+    renderJoints()
+    renderRegulators()
     renderInlets()
     renderSurveyPoints()
     renderSurveyLines()
@@ -480,16 +676,25 @@ onMounted(async () => {
 })
 
 watch(() => props.pipes, () => { renderPipes(); fitToAll() }, { deep: false })
+watch(() => props.units, () => { renderUnits(); fitToAll() }, { deep: false })
+watch(() => props.joints, renderJoints, { deep: false })
+watch(() => props.regulators, renderRegulators, { deep: false })
 watch(() => props.inlets, renderInlets, { deep: false })
 watch(() => props.surveyPoints, () => { renderSurveyPoints(); renderSurveyLines() }, { deep: false })
 watch(() => props.surveyLines, renderSurveyLines, { deep: false })
 watch(() => props.visible, (value) => toggleLayer('pipe', value))
 watch(() => props.inletsVisible, (value) => toggleLayer('inlet', value))
+watch(() => props.unitsVisible, (value) => toggleLayer('unit', value))
+watch(() => props.jointsVisible, (value) => toggleLayer('joint', value))
+watch(() => props.regulatorsVisible, (value) => toggleLayer('regulator', value))
 watch(() => props.surveyPointsVisible, (value) => toggleLayer('point', value))
 watch(() => props.surveyLinesVisible, (value) => { toggleLayer('line', value); toggleLayer('arrow', value) })
 watch(() => props.mode, (mode) => { menuWindow?.close(); if (mode !== 'connect') clearPending() })
 
 onBeforeUnmount(() => {
+  clearFacilitySelection()
+  selectedUnitId = null
+  syncUnitSelection()
   mapRef.value?.removeEventListener('pointerdown', onMapPointerDownCapture, true)
   mapRef.value?.removeEventListener('pointermove', onMapPointerMoveCapture, true)
   mapRef.value?.removeEventListener('pointerup', onMapPointerUpCapture, true)
@@ -512,8 +717,8 @@ onBeforeUnmount(() => {
     <div ref="mapRef" id="map"></div>
     <div v-if="loadError" class="amap-map-state amap-map-error"><strong>地图加载失败</strong><span>{{ loadError }}</span></div>
 
-    <Transition name="slide-right">
-      <div v-if="editingPoint" class="survey-editor-panel">
+    <Transition name="survey-editor-slide" mode="out-in" appear>
+      <div v-if="editingPoint" :key="editingPoint.id" class="survey-editor-panel">
         <div class="survey-editor-header">
           <span class="survey-editor-id">{{ editingPoint.id }}</span>
           <button class="survey-editor-close" @click="closeEdit" title="关闭">×</button>
@@ -540,6 +745,15 @@ onBeforeUnmount(() => {
           </div>
           <div class="survey-editor-row"><label class="survey-editor-label">埋深(米)</label><el-input-number v-model="editForm.depth" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></div>
           <div class="survey-editor-row"><label class="survey-editor-label">电流</label><el-input-number v-model="editForm.current" :step="0.1" :precision="3" size="small" style="width:100%" /></div>
+          <div class="survey-editor-row survey-photo-entry">
+            <label class="survey-editor-label">照片留痕</label>
+            <input ref="photoInputRef" class="survey-photo-input" type="file" accept="image/*" multiple @change="onPhotosSelected" />
+            <button type="button" class="survey-photo-add-btn" @click="choosePhotos">＋ 添加照片</button>
+            <div v-if="selectedPhotoNames.length" class="survey-photo-selection">
+              已选择 {{ selectedPhotoNames.length }} 张：{{ selectedPhotoNames.join('、') }}
+            </div>
+            <div v-else class="survey-photo-hint">支持选择多张现场照片，上传与持久化将在后续接入</div>
+          </div>
           <div class="survey-editor-row"><label class="survey-editor-label">备注</label><el-input v-model="editForm.note" type="textarea" :rows="2" size="small" /></div>
           <div class="survey-editor-coords">经度 {{ editingPoint.lng.toFixed(6) }}<br>纬度 {{ editingPoint.lat.toFixed(6) }}</div>
         </div>

@@ -10,7 +10,8 @@ const emit = defineEmits<{
 }>()
 const store = useCpStore()
 
-const completed = computed(() => Math.round(props.unit.inspection_progress * 9))
+const itemCount = computed(() => store.items.length)
+const completed = computed(() => Math.round(props.unit.inspection_progress * itemCount.value))
 const isActive = computed(() => store.selectedUnit?.id === props.unit.id)
 const jointCount = computed(() => store.unitJointCount(props.unit.id))
 const inletCount = computed(() => store.unitInletCount(props.unit.id))
@@ -69,7 +70,7 @@ function click() {
       />
     </div>
     <div style="display:flex;justify-content:space-between;font-size:12px;color:#606266">
-      <span>9 项检测 {{ completed }} / 9</span>
+      <span>{{ itemCount }} 项检测 {{ completed }} / {{ itemCount }}</span>
       <span style="color:#909399">✕ {{ jointCount }} 接头 ｜ ● {{ inletCount }} 引入</span>
     </div>
   </div>

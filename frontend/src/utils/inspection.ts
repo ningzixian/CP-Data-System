@@ -30,9 +30,8 @@ export function computeInspectionProgress(
     if (allowed.has(code)) statuses.set(code, record.status)
   }
 
-  const completed = [...statuses.values()].filter(
-    (status) => status === 'passed' || status === 'exception',
-  ).length
+  // 只有合格才算完成；异常表示仍需处理，不能增加完成进度。
+  const completed = [...statuses.values()].filter((status) => status === 'passed').length
   const progress = itemCodes.length ? Math.min(completed / itemCodes.length, 1) : 0
 
   let status: InspectionStatus = 'pending'

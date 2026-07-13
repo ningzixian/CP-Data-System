@@ -146,15 +146,15 @@ export const useSurveyStore = defineStore('survey', () => {
     pushHistory()
   }
 
-  function addLine(l: Omit<SurveyLine, 'id' | 'createdAt'>): SurveyLine {
-    // 防重复:同 fromId+toId 不允许两条
+  function addLine(l: Omit<SurveyLine, 'id' | 'createdAt'>): SurveyLine | null {
+    // 管线没有方向：A→B 与 B→A 视为同一条，两个端点之间最多只能有一条。
     const existing = lines.value.find((x) =>
       (x.fromId === l.fromId && x.toId === l.toId) ||
       (x.fromId === l.toId && x.toId === l.fromId),
     )
     if (existing) {
       console.warn('[Survey] 管线已存在:', l.fromId, '→', l.toId)
-      return existing
+      return null
     }
     const line: SurveyLine = {
       ...l,

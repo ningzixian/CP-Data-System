@@ -4,7 +4,7 @@
  *
  * 触发:单击控制单元(poly 或 UnitCard),不与双击抽屉冲突
  * 位置:右侧悬浮卡片,上/下/右各留 20px 空隙,宽 280px,竖向填满 70vh+
- * 风格:大字号进度环 + 状态色块 + 9 项检测矩阵,一眼能看清进度
+ * 风格:大字号进度环 + 状态色块 + 检测矩阵,一眼能看清进度
  *
  * 显示逻辑:
  *  - store.selectedUnit 有值 → 滑入
@@ -13,7 +13,7 @@
  *
  * 与双击抽屉的关系:
  *  - 单击 → 本卡片(快速浏览)
- *  - 双击 → 抽屉(完整 9 项录入表单)
+ *  - 双击 → 抽屉(完整检测录入表单)
  *  - 卡片底部"查看完整录入 →" 按钮 → 触发抽屉
  */
 import { computed } from 'vue'
@@ -32,6 +32,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'open-detail'): void
+  (e: 'open-data-modules'): void
 }>()
 
 const store = useCpStore()
@@ -40,8 +41,9 @@ const unit = computed(() => store.selectedUnit)
 const progressPct = computed(() =>
   unit.value ? Math.round(unit.value.inspection_progress * 100) : 0,
 )
+const itemCount = computed(() => store.items.length)
 const completedCount = computed(() =>
-  unit.value ? Math.round(unit.value.inspection_progress * 9) : 0,
+  unit.value ? Math.round(unit.value.inspection_progress * itemCount.value) : 0,
 )
 
 const statusText = computed(() =>
@@ -133,7 +135,7 @@ const pipeLengthM = computed(() => {
 
     <!-- 进度文字 -->
     <div class="info-progress-text">
-      9 项检测 <strong>{{ completedCount }}</strong> / 9 完成
+      {{ itemCount }} 项检测 <strong>{{ completedCount }}</strong> / {{ itemCount }} 完成
     </div>
 
     <!-- 基础属性：单元的物理/空间信息(给领导汇报"这个单元有多大、多长") -->
@@ -155,19 +157,15 @@ const pipeLengthM = computed(() => {
           <div class="info-attr-label">绝缘接头</div>
           <div class="info-attr-value">{{ jointCount }} <small>个</small></div>
         </div>
-        <div class="info-attr-cell">
-          <div class="info-attr-label">起点里程</div>
-          <div class="info-attr-value">{{ unit.start_mileage ?? '—' }} <small>m</small></div>
-        </div>
-        <div class="info-attr-cell">
-          <div class="info-attr-label">终点里程</div>
-          <div class="info-attr-value">{{ unit.end_mileage ?? '—' }} <small>m</small></div>
-        </div>
       </div>
     </section>
 
     <!-- 底部按钮 -->
     <footer class="info-footer">
+      <button class="info-detail-btn" @click="emit('open-data-modules')">
+        查看数据模块
+        <span class="info-detail-arrow">→</span>
+      </button>
       <button class="info-detail-btn" @click="emit('open-detail')">
         查看完整录入
         <span class="info-detail-arrow">→</span>
