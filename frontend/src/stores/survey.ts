@@ -49,9 +49,9 @@ export function wgs84ToGcj02(lng: number, lat: number): [number, number] {
   let dLng = transformLng(lng - 105.0, lat - 35.0)
   const radLat = (lat / 180.0) * Math.PI
   let magic = Math.sin(radLat)
-  magic = 1 - 0.00669342162296594323 * magic * magic
+  magic = 1 - 0.006693421622965943 * magic * magic
   const sqrtMagic = Math.sqrt(magic)
-  dLat = (dLat * 180.0) / ((6378245.0 * (1 - 0.00669342162296594323)) / (magic * sqrtMagic) * Math.PI)
+  dLat = (dLat * 180.0) / ((6378245.0 * (1 - 0.006693421622965943)) / (magic * sqrtMagic) * Math.PI)
   dLng = (dLng * 180.0) / (6378245.0 / sqrtMagic * Math.cos(radLat) * Math.PI)
   return [lng + dLng, lat + dLat]
 }
@@ -66,7 +66,9 @@ function loadFromStorage(): Persisted {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (raw) return JSON.parse(raw)
-  } catch {}
+  } catch (error) {
+    console.warn('[Survey] localStorage 数据无效，已忽略：', error)
+  }
   return { points: [], lines: [] }
 }
 
@@ -146,9 +148,13 @@ export const useSurveyStore = defineStore('survey', () => {
 
   function addLine(l: Omit<SurveyLine, 'id' | 'createdAt'>): SurveyLine {
     // 防重复:同 fromId+toId 不允许两条
-    if (lines.value.some((x) => x.fromId === l.fromId && x.toId === l.toId)) {
+    const existing = lines.value.find((x) =>
+      (x.fromId === l.fromId && x.toId === l.toId) ||
+      (x.fromId === l.toId && x.toId === l.fromId),
+    )
+    if (existing) {
       console.warn('[Survey] 管线已存在:', l.fromId, '→', l.toId)
-      return lines.value.find((x) => x.fromId === l.fromId && x.toId === l.toId)!
+      return existing
     }
     const line: SurveyLine = {
       ...l,
@@ -287,7 +293,7 @@ export const useSurveyStore = defineStore('survey', () => {
         count++
       }
       console.log(`[Survey] 从 CSV 加载了 ${count} 个新点位(跳过 ${skipped} 个重复)`)
-      pushHistory()
+      if (count > 0) pushHistory()
     } catch (e) {
       console.warn('[Survey] CSV 加载失败:', e)
     }

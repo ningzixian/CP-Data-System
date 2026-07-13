@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { STATUS_COLORS } from '@/types/items'
 import { useCpStore } from '@/stores/cp'
 import { loadAMap } from '@/map/amap-loader'
+import { escapeHtml as e } from '@/utils/html'
 import type { CorrosionUnit } from '@/types/models'
 
 const emit = defineEmits<{
@@ -87,11 +88,11 @@ function communityColor(progress: number, exception = false) {
 
 function communityHtml(name: string, count: number, progress: number, exception: boolean, index: number) {
   const color = communityColor(progress, exception)
-  return `<div class="community-anim" style="width:130px;height:130px;display:flex;align-items:center;justify-content:center;animation:communityPopIn .6s cubic-bezier(.34,1.56,.64,1) ${(index * 0.12).toFixed(2)}s both;transform-origin:center"><div class="community-hover-target" style="background:${color};color:#fff;border-radius:50%;width:130px;height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-family:-apple-system,sans-serif"><div style="font-size:30px;font-weight:700;line-height:1">${Math.round(progress * 100)}%</div><div style="font-size:13px;margin-top:6px;font-weight:600">${name}</div><div style="font-size:11px;margin-top:3px;opacity:.85">${count} 个单元</div></div></div>`
+  return `<div class="community-anim" style="width:130px;height:130px;display:flex;align-items:center;justify-content:center;animation:communityPopIn .6s cubic-bezier(.34,1.56,.64,1) ${(index * 0.12).toFixed(2)}s both;transform-origin:center"><div class="community-hover-target" style="background:${color};color:#fff;border-radius:50%;width:130px;height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-family:-apple-system,sans-serif"><div style="font-size:30px;font-weight:700;line-height:1">${Math.round(progress * 100)}%</div><div style="font-size:13px;margin-top:6px;font-weight:600">${e(name)}</div><div style="font-size:11px;margin-top:3px;opacity:.85">${count} 个单元</div></div></div>`
 }
 
 function boundaryInfoHtml(name: string, progress: number, count: number, length: number) {
-  return `<div class="community-boundary-info-content"><div class="community-boundary-info-name">${name}</div><div class="community-boundary-info-metrics"><div class="community-boundary-info-row"><span>进度</span><span>：</span><span>${Math.round(progress * 100)}%</span></div><div class="community-boundary-info-row"><span>单元</span><span>：</span><span>${count} 个</span></div><div class="community-boundary-info-row"><span>管线</span><span>：</span><span>${Math.round(length).toLocaleString('zh-CN')} 米</span></div></div></div>`
+  return `<div class="community-boundary-info-content"><div class="community-boundary-info-name">${e(name)}</div><div class="community-boundary-info-metrics"><div class="community-boundary-info-row"><span>进度</span><span>：</span><span>${Math.round(progress * 100)}%</span></div><div class="community-boundary-info-row"><span>单元</span><span>：</span><span>${count} 个</span></div><div class="community-boundary-info-row"><span>管线</span><span>：</span><span>${Math.round(length).toLocaleString('zh-CN')} 米</span></div></div></div>`
 }
 
 function add(kind: keyof typeof overlays, overlay: any) {
@@ -243,7 +244,7 @@ function renderPipes() {
   ;(store.facilities?.pipes ?? []).forEach((pipe) => {
     if (pipe.coords.length < 2) return
     const line = new AMapApi.Polyline({ path: pipe.coords, ...PIPE_DEFAULT, lineJoin: 'round', lineCap: 'round', bubble: false })
-    const tip = `<b>${pipe.pipeno || pipe.fid}</b><br>管材：${pipe.material || '—'}　外径：${pipe.diametero || '—'}mm<br>壁厚：${pipe.thickness || '—'}mm　长度：${pipe.length || '—'}m<br>压力：${pipe.pressured}`
+    const tip = `<b>${e(pipe.pipeno || pipe.fid)}</b><br>管材：${e(pipe.material || '—')} | 外径：${e(pipe.diametero || '—')}mm<br>壁厚：${e(pipe.thickness || '—')}mm | 长度：${e(pipe.length || '—')}m<br>压力：${e(pipe.pressured)}`
     bindFacility('pipe', line, null, tip)
     add('pipe', line)
   })
@@ -254,7 +255,7 @@ function renderJoints() {
   ;(store.facilities?.joints ?? []).forEach((joint) => {
     const item = marker({ position: [joint.lng, joint.lat], className: 'joint-marker amap-facility-marker', html: '<div class="facility-anim"><div style="color:#f56c6c;font-size:22px;font-weight:900;line-height:22px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;font-family:Arial">✕</div></div>', size: [22, 22], zIndex: 520 })
     const belongs = joint.unit_id ? store.units.find((unit) => unit.id === joint.unit_id)?.name : null
-    bindFacility('joint', item, [joint.lng, joint.lat], `<b>✕ ${joint.type}</b><br>编码：${joint.ecode}<br>压力：${joint.pressured}<br>管号：${joint.pipeno || '—'}${belongs ? `<br>归属：${belongs}` : '<br><span style="color:#f56c6c">⚠ 未归属</span>'}`)
+    bindFacility('joint', item, [joint.lng, joint.lat], `<b>✕ ${e(joint.type)}</b><br>编码：${e(joint.ecode)}<br>压力：${e(joint.pressured)}<br>管号：${e(joint.pipeno || '—')}${belongs ? `<br>归属：${e(belongs)}` : '<br><span style="color:#f56c6c">⚠ 未归属</span>'}`)
     add('joint', item)
   })
 }
@@ -263,7 +264,7 @@ function renderRegulators() {
   clearKind('regulator')
   ;(store.facilities?.regulators ?? []).forEach((regulator) => {
     const item = marker({ position: [regulator.lng, regulator.lat], className: 'regulator-marker amap-facility-marker', html: '<div class="facility-anim"><div style="background:#1890ff;color:#fff;border-radius:4px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font-weight:700;font-size:14px">调</div></div>', size: [32, 32], zIndex: 510 })
-    bindFacility('regulator', item, [regulator.lng, regulator.lat], `<b>调压箱 ${regulator.name}</b><br>编码：${regulator.ecode}<br>压力：${regulator.pressured}`)
+    bindFacility('regulator', item, [regulator.lng, regulator.lat], `<b>调压箱 ${e(regulator.name)}</b><br>编码：${e(regulator.ecode)}<br>压力：${e(regulator.pressured)}`)
     add('regulator', item)
   })
 }
@@ -273,7 +274,7 @@ function renderInlets() {
   ;(store.facilities?.inlets ?? []).forEach((inlet) => {
     const item = marker({ position: [inlet.lng, inlet.lat], className: 'inlet-marker amap-facility-marker', html: '<div class="facility-anim"><div style="background:#909399;color:#fff;border-radius:50%;width:14px;height:14px;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div></div>', size: [14, 14], zIndex: 500 })
     const belongs = inlet.unit_id ? store.units.find((unit) => unit.id === inlet.unit_id)?.name : null
-    bindFacility('inlet', item, [inlet.lng, inlet.lat], `<b>引入口 ${inlet.ecode}</b><br>压力：${inlet.pressured}<br>管号：${inlet.pipeno}${belongs ? `<br>归属：${belongs}` : ''}`)
+    bindFacility('inlet', item, [inlet.lng, inlet.lat], `<b>引入口 ${e(inlet.ecode)}</b><br>压力：${e(inlet.pressured)}<br>管号：${e(inlet.pipeno)}${belongs ? `<br>归属：${e(belongs)}` : ''}`)
     add('inlet', item)
   })
 }

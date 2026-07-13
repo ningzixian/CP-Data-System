@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ElMessage } from 'element-plus'
 import { useCpStore } from '@/stores/cp'
 import StatusTag from './StatusTag.vue'
 import type { CorrosionUnit } from '@/types/models'

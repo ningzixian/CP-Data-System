@@ -3,13 +3,13 @@
  * 后端真实接口实现后，把 .env 的 VITE_USE_MOCK 改为 false 即可切换
  */
 import { INSPECTION_ITEMS } from '@/types/items'
+import { computeInspectionProgress, latestRecordsByItem } from '@/utils/inspection'
 import type {
   Pipeline, CorrosionUnit, InspectionPoint, InspectionRecord,
   DashboardData, InspectionItemCode, RecordStatus,
 } from '@/types/models'
 
 // ============== 静态数据 ==============
-const now = () => new Date().toISOString()
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString()
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3600000).toISOString()
 
@@ -315,13 +315,8 @@ export function persistMockRecords() {
 
 // ============== 工具函数 ==============
 function computeUnitProgress(unitId: number): { progress: number; status: CorrosionUnit['inspection_status'] } {
-  const total = ITEM_CODES.length
   const recs = mockStore.records.filter((r) => r.unit_id === unitId)
-  const completed = recs.filter((r) => r.status === 'passed' || r.status === 'exception').length
-  const progress = total ? completed / total : 0
-  let status: CorrosionUnit['inspection_status'] = 'pending'
-  if (progress >= 1) status = 'completed'
-  else if (progress > 0) status = 'in_progress'
+  const { progress, status } = computeInspectionProgress(recs, ITEM_CODES)
   return { progress, status }
 }
 
@@ -329,17 +324,8 @@ export function buildDashboard(): DashboardData {
   const items = INSPECTION_ITEMS.map((i) => ({ code: i.code, name: i.name }))
   const rows = mockStore.units.map((u) => {
     const recs = mockStore.records.filter((r) => r.unit_id === u.id)
-    const recMap = new Map(recs.map((r) => [r.item_code, r.status]))
-
-    // 实时从记录算进度，避免手写进度与实际记录不一致
-    const passed = recs.filter((r) => r.status === 'passed').length
-    const exception = recs.filter((r) => r.status === 'exception').length
-    const completed = passed + exception
-    const progress = items.length ? completed / items.length : 0
-    let status: 'pending' | 'in_progress' | 'completed' | 'exception' = 'pending'
-    if (exception > 0 && completed === items.length) status = 'exception'
-    else if (progress >= 1) status = 'completed'
-    else if (progress > 0) status = 'in_progress'
+    const { progress, status } = computeInspectionProgress(recs, ITEM_CODES)
+    const recMap = latestRecordsByItem(recs)
 
     return {
       unit_id: u.id,
@@ -351,7 +337,7 @@ export function buildDashboard(): DashboardData {
       items: items.map((it) => ({
         code: it.code,
         name: it.name,
-        status: (recMap.get(it.code) ?? 'pending') as any,
+        status: recMap.get(it.code)?.status ?? 'pending',
       })),
     }
   })

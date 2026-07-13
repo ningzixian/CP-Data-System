@@ -1,300 +1,215 @@
-# 燃气管道阴极保护数据管理系统 — 前端
+# 燃气管道阴极保护数据管理系统（前端）
 
-**第一阶段：绝缘方案-现状检测** — 纯前端展示，后端接口预留。
+面向燃气管道阴极保护“绝缘方案—现状检测”阶段的数据管理前端。目前项目可在无后端的 Mock 模式下运行，包含多小区设施地图、检测记录录入、进度看板、数据管理和管线勘测功能。
 
----
+## 当前功能
+
+### 地图视图（`/map`）
+
+- 展示南海家园三里、六里、七里的小区边界和设施数据。
+- 支持小区概览与单元详情两级地图视图。
+- 展示控制单元、低压管线、绝缘接头、调压箱和引入口。
+- 可分别控制各类设施的显示与隐藏。
+- 点击控制单元可查看面积、管线长度、关联设施和检测进度。
+- 可在详情抽屉中录入和修改 9 项检测记录。
+
+### 管线勘测（`/survey`）
+
+- 当前勘测范围为南海家园三里。
+- 自动导入现场检测点坐标 CSV。
+- 将 GPS 的 WGS-84 坐标转换为高德地图使用的 GCJ-02 坐标。
+- 支持添加普通点、三通和弯头，并可编辑点位类型与旋转角度。
+- 支持勘测点和引入口之间连线、删除管线、撤销和重做。
+- 支持燃气管线、引入口、勘测点和勘测管线的独立显隐。
+- 勘测成果暂存在浏览器 `localStorage`，目前尚未接入后端。
+
+### 进度看板（`/dashboard`）
+
+- 统计腐控单元总数、已完成、进行中、待开始和异常数量。
+- 用雷达图展示各控制单元 9 项检测的完成情况。
+- 用状态矩阵查看每个单元、每个检测项的状态。
+
+### 数据管理（`/manage`）
+
+- 查看和删除检测记录。
+- 新增腐控单元。
+- 预留 Excel 批量导入接口。
+- Mock 模式下 Excel 导入尚未实现，需要真实后端支持。
+
+## 技术栈
+
+- Vue 3 + TypeScript
+- Vite 5
+- Pinia
+- Vue Router（Hash 路由）
+- Element Plus
+- 高德地图 JS API 2.0
+- ECharts
+- Axios
 
 ## 项目结构
 
-```
+```text
 CP Data System/
-├── frontend/                ← 你在这里写代码
-│   ├── src/
-│   │   ├── api/             ← 后端接口调用层（封装 axios）
-│   │   │   ├── client.ts        axios 实例 + mock 切换
-│   │   │   ├── pipelines.ts     管道 CRUD
-│   │   │   ├── units.ts         腐控单元 CRUD
-│   │   │   ├── points.ts        检测点 CRUD
-│   │   │   ├── records.ts       检测记录 CRUD
-│   │   │   ├── items.ts         9 项检测项定义
-│   │   │   ├── dashboard.ts     仪表盘统计
-│   │   │   └── import.ts        Excel 导入
-│   │   ├── components/      ← 复用组件
-│   │   │   ├── MapView.vue          主地图（高德 JS API 2.0）
-│   │   │   ├── SurveyMapView.vue    管线勘测地图（高德 JS API 2.0）
-│   │   │   ├── UnitCard.vue         腐控单元卡片
-│   │   │   ├── InspectionForm.vue   9 项检测录入表单
-│   │   │   └── StatusTag.vue        状态标签
-│   │   ├── views/           ← 三个主页面
-│   │   │   ├── MapPage.vue          地图 + 单元列表 + 抽屉录入
-│   │   │   ├── DashboardPage.vue    进度看板（雷达图+矩阵）
-│   │   │   └── ManagePage.vue       数据管理（表格+Excel 导入+新增单元）
-│   │   ├── stores/cp.ts     ← Pinia 全局状态
-│   │   ├── mock/            ← Mock 数据 + 适配器（不依赖后端能跑）
-│   │   ├── types/           ← TypeScript 类型定义（前后端契约）
-│   │   │   ├── models.ts
-│   │   │   └── items.ts
-│   │   ├── router.ts        ← Vue Router
-│   │   ├── App.vue          ← 入口组件
-│   │   ├── main.ts          ← 启动文件
-│   │   └── style.css        ← 全局样式
-│   ├── .env.development     ← 开发环境变量（默认 mock=true）
-│   ├── .env.production      ← 生产环境变量（mock=false，待填后端地址）
-│   ├── index.html
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   └── README.md
-├── docs/
-│   └── API.md               ← 给后端开发看的接口约定文档
-├── 讯腾报价.xlsx            ← 原始报价文件（参考）
-└── README.md                ← 本文件
+├─ docs/
+│  └─ API.md                    # 后端接口约定
+└─ frontend/
+   ├─ public/data/              # 运行时加载的设施与现场坐标 CSV
+   ├─ src/
+   │  ├─ api/                   # API 调用封装及 Mock/真实后端切换
+   │  ├─ components/            # 地图、表单和业务卡片组件
+   │  ├─ map/                   # 高德地图统一加载器
+   │  ├─ mock/                  # Mock 路由、业务数据及本地持久化
+   │  ├─ stores/                # Pinia 业务状态和管线勘测状态
+   │  ├─ types/                 # 业务模型、检测项和勘测类型
+   │  ├─ utils/                 # CSV、几何和设施拓扑处理
+   │  ├─ views/                 # 四个主页面
+   │  ├─ App.vue
+   │  ├─ main.ts
+   │  ├─ router.ts
+   │  └─ style.css
+   ├─ .env.development
+   ├─ .env.example
+   ├─ .env.production
+   ├─ package.json
+   └─ vite.config.ts
 ```
 
----
+## 数据架构
 
-## 快速开始
+项目目前同时使用两类数据源。
 
-### 1. 安装依赖
+### 设施空间数据
 
-需要 Node.js 18+：
+`public/data/` 下的 CSV 提供：
+
+- 小区边界
+- 控制单元多边形
+- 低压燃气管线
+- 绝缘接头
+- 调压箱
+- 引入口
+- 现场勘测点坐标
+
+应用启动后，`src/utils/facilities.ts` 会并行加载各小区数据。引入口通过点与控制单元多边形的空间关系确定归属；绝缘接头优先通过管网拓扑搜索可达引入口，再确定所属控制单元。
+
+新增小区时，需要在 `public/data/` 中放入相应 CSV，并更新 `src/utils/facilities.ts` 中的 `COMMUNITIES`。
+
+### 检测业务数据
+
+管道、检测项和检测记录统一从 `src/api/` 调用：
+
+- 开发环境默认使用 `src/mock/`。
+- 接入后端时使用 `/api/*` 接口。
+- Mock 检测记录会持久化到浏览器 `localStorage`。
+- `src/stores/cp.ts` 将业务记录与设施数据合并并计算单元进度。
+
+后端接口契约见 [`../docs/API.md`](../docs/API.md)。
+
+## 9 项检测内容
+
+| 编码 | 检测项 | 报价（元/km） |
+| --- | --- | ---: |
+| `PLAN_OUTLINE` | 编制方案大纲 | 450 |
+| `JOINT_VERIFY` | 绝缘接头位置和绝缘性能复核 | 12,500 |
+| `SOIL_RESISTIVITY` | 土壤电阻率检测 | 1,350 |
+| `DC_STRAY_CURRENT` | 直流杂散电流检测 | 1,700 |
+| `COATING_DETECT` | 管道防腐层非开挖检测 | 750 |
+| `PIPE_GROUND_POTENTIAL` | 管地腐蚀电位检测 | 3,000 |
+| `ELECTRIC_CONTINUITY` | 管道电连通性检测 | 4,500 |
+| `INLET_PARAM` | 引入口参数测量 | 350 |
+| `DATA_ENTRY` | 检测数据填报 | 300 |
+
+检测项定义位于 `src/types/items.ts`。调整检测项时，需要同步确认后端契约和已有记录的兼容性。
+
+## 本地运行
+
+需要 Node.js 18 或更高版本。
 
 ```bash
 cd frontend
 npm install
-```
-
-### 2. 启动开发服务器
-
-```bash
 npm run dev
 ```
 
-打开 `http://localhost:5173` 即可看到界面，**无需后端**（默认 mock 模式）。
+默认地址为 `http://localhost:5173`。
 
-### 3. 演示数据
-
-mock 数据里预置了：
-- 1 条管道（南京港华燃气-江宁示范段）
-- 4 个腐控单元（JN-01 ~ JN-04）
-- 13 条检测记录（JN-02 部分完成、JN-04 全部完成）
-
-打开就能看到效果。
-
-### 4. 切到真实后端
-
-后端联调时，修改 `frontend/.env.development`：
+常用命令：
 
 ```bash
-VITE_USE_MOCK=false
-VITE_API_BASE_URL=http://localhost:3000   # 或公司内网地址
-```
-
-无需改任何前端代码。
-
----
-
-## 三个页面功能
-
-### 🗺️ 地图视图 (`/map`)
-- **左侧**：4 个统计卡 + 腐控单元卡片列表（点击高亮+地图飞行）
-- **右侧**：高德地图 + 腐控单元标记（百分比+颜色显示进度）
-- **抽屉**：点击单元或标记打开抽屉，按 9 项检测分类 Tab，每个 Tab 一个录入表单
-
-### 📊 进度看板 (`/dashboard`)
-- **4 个统计卡**：总数 / 已完成 / 进行中 / 异常
-- **雷达图**：每个腐控单元 9 项检测的完成度
-- **详情矩阵**：横轴 9 项检测 × 纵轴单元，单元格颜色显示状态
-
-### 📋 数据管理 (`/manage`)
-- **检测记录表格**：所有检测记录的列表
-- **Excel 批量导入**：上传 .xlsx 批量导入
-- **新增腐控单元**：弹窗表单（包含经纬度、里程、地址）
-
----
-
-## 9 项检测项（与报价文件 R3-R11 对应）
-
-| 编码 | 名称 | 报价（元/km） |
-|---|---|---|
-| `PLAN_OUTLINE` | ① 编制方案大纲 | 450 |
-| `JOINT_VERIFY` | ② 绝缘接头位置和绝缘性能复核 | 12,500 |
-| `SOIL_RESISTIVITY` | ③ 土壤电阻率检测 | 1,350 |
-| `DC_STRAY_CURRENT` | ④ 直流杂散电流检测 | 1,700 |
-| `COATING_DETECT` | ⑤ 管道防腐层非开挖检测 | 750 |
-| `PIPE_GROUND_POTENTIAL` | ⑥ 管地腐蚀电位检测 | 3,000 |
-| `ELECTRIC_CONTINUITY` | ⑦ 管道电联通性检测 | 4,500 |
-| `INLET_PARAM` | ⑧ 引入口参数测量 | 350 |
-| `DATA_ENTRY` | ⑨ 检测数据填报 | 300 |
-
-合计约 **25,000 元/km**
-
----
-
-## 常用命令
-
-```bash
-# 开发（mock 模式）
+# 启动开发服务器
 npm run dev
 
-# 开发（连接真实后端）
-# 先改 .env.development 的 VITE_USE_MOCK=false
-npm run dev
-
-# 构建生产包
+# TypeScript 检查并构建生产文件
 npm run build
-# → dist/ 目录可丢到任何静态服务器（Nginx、公司服务器）
 
-# 本地预览构建产物
+# 预览生产构建
 npm run preview
-
-# 类型检查
-npm run build   # vue-tsc --noEmit 会自动跑
 ```
 
----
+## 环境配置
 
-## 部署到公司服务器（VPN 内网）
+可从 `.env.example` 复制配置。主要变量如下：
 
-### 1. 构建
+```dotenv
+# 是否使用前端 Mock
+VITE_USE_MOCK=true
+
+# 真实后端地址；留空时使用当前站点
+VITE_API_BASE_URL=
+
+# 高德 Web 端 JS API Key
+VITE_AMAP_KEY=
+
+# 仅供本地开发临时使用
+VITE_AMAP_SECURITY_CODE=
+
+# 生产环境推荐使用同源安全代理
+VITE_AMAP_SERVICE_HOST=/_AMapService
+```
+
+### Mock 模式
+
+开发环境默认配置：
+
+```dotenv
+VITE_USE_MOCK=true
+```
+
+无需启动后端即可使用主要页面。检测记录和勘测成果分别保存在浏览器本地存储中。
+
+### 真实后端
+
+```dotenv
+VITE_USE_MOCK=false
+VITE_API_BASE_URL=http://localhost:3000
+```
+
+开发服务器也配置了 `/api` 到 `http://localhost:3000` 的代理。实际部署时应按环境调整后端地址或反向代理。
+
+### 高德地图
+
+项目通过 `src/map/amap-loader.ts` 统一加载高德地图。生产环境不应把安全密钥直接打包到前端，推荐配置 `VITE_AMAP_SERVICE_HOST`，由服务端代理高德安全验证请求。
+
+## 构建与部署
 
 ```bash
+cd frontend
 npm run build
 ```
 
-输出在 `frontend/dist/`，纯静态文件。
+输出目录为 `frontend/dist/`。项目使用 Hash 路由，可部署到 Nginx 或其他静态文件服务。若使用真实后端，还需为 `/api/` 配置反向代理。
 
-### 2. 上传到服务器
+## 当前限制
 
-把 `dist/` 整个目录上传到服务器，比如 `/var/www/cp-frontend/`。
+- 管线勘测页面暂时固定为南海家园三里。
+- 勘测点和勘测管线仅保存在当前浏览器中。
+- 勘测 ID 前缀目前固定为 `NHJY`。
+- Mock 模式不执行真实 Excel 导入。
+- 仓库当前仅包含前端，生产使用需要实现 `docs/API.md` 中的后端接口。
 
-### 3. Nginx 配置（示例）
+## 编码约定
 
-```nginx
-server {
-    listen 80;
-    server_name cp.xxx.local;   # 你的内网域名
-
-    root /var/www/cp-frontend;
-    index index.html;
-
-    # SPA 路由 fallback
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # 反代后端 API（如果后端在同一台机器）
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # 缓存静态资源
-    location ~* \.(js|css|png|jpg|svg|woff2?)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-}
-```
-
-### 4. 内网访问
-
-通过 VPN 连接后访问 `http://cp.xxx.local` 即可。
-
----
-
-## 开发小贴士
-
-### 加一个 API 调用
-
-在 `src/api/` 加文件，导出对象：
-
-```typescript
-// src/api/foo.ts
-import { request } from './client'
-
-export const fooApi = {
-  list: () => request<Foo[]>({ url: '/api/foo', method: 'GET' }),
-}
-```
-
-在组件里：
-
-```typescript
-import { fooApi } from '@/api/foo'
-const list = await fooApi.list()
-```
-
-### 加一个视图
-
-1. 在 `src/views/` 加 `FooPage.vue`
-2. 在 `src/router.ts` 注册路由
-
-### 改 9 项检测项
-
-直接改 `src/types/items.ts` 的 `INSPECTION_ITEMS` 数组即可。
-
-### 切换 mock 数据
-
-修改 `src/mock/data.ts` 即可。
-
----
-
-## 后端开发对接
-
-后端开发请看 `../docs/API.md`，里面有完整的接口约定、请求/响应示例、数据模型 TS 定义。
-
-后端实现完后，修改 `.env.production` 切到真实地址即可，无需改前端代码。
-
----
-
-## 移动端适配
-
-Element Plus 本身是响应式的，地图和表单在手机上都能用。但有以下建议：
-
-- 抽屉宽度在小屏幕下可能过宽，可在 CSS 里 `@media (max-width: 768px)` 调整
-- 现场录入的 GPS 定位 + 北斗坐标字段已预留（`bd_coord`），可在手机 H5 里调用 `navigator.geolocation`
-
-如果后续要做原生 Android App（你提到过），可以考虑：
-- **UniApp / Taro** — Vue 代码编译为 Android/iOS
-- **WebView 套壳** — 最简单，直接打包为 APK
-
----
-
-## 技术栈
-
-- **Vue 3.4** — Composition API + `<script setup>`
-- **TypeScript 5** — 完整类型约束
-- **Vite 5** — 极速开发服务器
-- **Pinia 2** — Vuex 的继任者，更轻量
-- **Vue Router 4** — Hash 模式（无需后端路由配合）
-- **Element Plus 2.6** — UI 组件库
-- **高德地图 JS API 2.0** — 主地图与管线勘测地图
-- **ECharts 5** — 图表（雷达图）
-- **Axios 1.6** — HTTP 客户端
-
----
-
-## 常见问题
-
-**Q: 后端还没准备好，怎么预览？**  
-A: 默认就是 mock 模式，`npm run dev` 直接看效果。
-
-**Q: 改完代码没生效？**  
-A: Vite 是热更新的，浏览器会自动刷新；如果没动，强制刷新（Ctrl+Shift+R）。
-
-**Q: 地图加载不出来？**  
-A: 检查网络（高德瓦片需要外网访问）。公司内网可以换成天地图瓦片 URL（在 `src/components/MapView.vue` 改 `AMAP_URL`）。
-
-**Q: 9 项检测项的数据怎么录入？**  
-A: 在地图视图点击任意单元 → 抽屉弹出 → 按 9 个 Tab 切换 → 每个 Tab 一个表单 → 填完点保存。
-
-**Q: 怎么加第十项检测？**  
-A: 在 `src/types/items.ts` 的 `INSPECTION_ITEMS` 数组加一项，前端自动渲染。后端 `InspectionRecord.ITEM_CODES` 同步加。
-
----
-
-## 许可与引用
-
-报价数据来源：`讯腾报价.xlsx`（项目原始文件）。
+- 源代码、Markdown 和 CSV 配置文本应统一保存为 UTF-8。
+- 修改中文文件时，编辑器应明确使用 UTF-8，避免用系统默认 ANSI/GBK 编码覆盖。
+- 如果 PowerShell 中显示乱码，应先检查终端输入输出编码；不要仅因终端显示异常就转换原文件编码。

@@ -58,15 +58,6 @@ function communityOf(unit: CorrosionUnit): string {
   return idx > 0 ? addr.slice(0, idx) : '未分类'
 }
 
-function emptyCommunity(name: string) {
-  return {
-    name,
-    units: [] as CorrosionUnit[],
-    avgProgress: 0,
-    hasException: false,
-  }
-}
-
 /** 小区列表（按 address 前缀动态分组）
  *  - 先把 store.units 按 communityOf 分桶
  *  - 再按 COMMUNITY_ORDER 顺序拼装：有数据接 units，没数据用 emptyCommunity 占位

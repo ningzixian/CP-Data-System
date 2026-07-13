@@ -7,15 +7,17 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { pipelinesApi } from '@/api/pipelines'
 import { recordsApi } from '@/api/records'
 import { dashboardApi } from '@/api/dashboard'
 import { fetchItems } from '@/api/items'
 import { loadFacilities, type FacilitiesData } from '@/utils/facilities'
 import { USE_MOCK } from '@/api/client'
+import { computeInspectionProgress, latestRecordsByItem } from '@/utils/inspection'
 import type {
   Pipeline, CorrosionUnit, InspectionPoint, InspectionRecord,
-  DashboardData, InspectionItemDef, InspectionStatus, RecordStatus,
+  DashboardData, InspectionItemDef, RecordStatus,
 } from '@/types/models'
 
 export const useCpStore = defineStore('cp', () => {
@@ -25,6 +27,7 @@ export const useCpStore = defineStore('cp', () => {
   const dashboard = ref<DashboardData | null>(null)
   const items = ref<InspectionItemDef[]>([])
   const loading = ref(false)
+  const loadError = ref('')
 
   // 现场设施数据（来自 CSV）
   const units = ref<CorrosionUnit[]>([])
@@ -50,6 +53,7 @@ export const useCpStore = defineStore('cp', () => {
    */
   async function loadAll() {
     loading.value = true
+    loadError.value = ''
     try {
       const [fac, p, its, r] = await Promise.all([
         loadFacilities(),
@@ -80,6 +84,10 @@ export const useCpStore = defineStore('cp', () => {
         }))
 
       if (!USE_MOCK) dashboard.value = await dashboardApi.get()
+    } catch (error) {
+      loadError.value = error instanceof Error ? error.message : '数据加载失败'
+      console.error('[CP Store] 数据加载失败：', error)
+      ElMessage.error(`数据加载失败：${loadError.value}`)
     } finally {
       loading.value = false
     }
@@ -92,12 +100,7 @@ export const useCpStore = defineStore('cp', () => {
     // 把记录算出的进度回写到单元，同时保留当前选中单元。
     units.value = units.value.map((u) => {
       const recs = nextRecords.filter((x) => x.unit_id === u.id)
-      const completed = recs.filter((x) => x.status === 'passed' || x.status === 'exception').length
-      const total = items.value.length
-      const progress = total ? completed / total : 0
-      let status: InspectionStatus = 'pending'
-      if (progress >= 1) status = 'completed'
-      else if (progress > 0) status = 'in_progress'
+      const { progress, status } = computeInspectionProgress(recs, items.value.map((item) => item.code))
       return { ...u, inspection_progress: progress, inspection_status: status }
     })
     if (selectedId !== undefined && selectedUnit.value) {
@@ -123,7 +126,7 @@ export const useCpStore = defineStore('cp', () => {
     // 用最新的 units（已经算过 progress/status）
     const rows = units.value.map((u) => {
       const recs = records.value.filter((r) => r.unit_id === u.id)
-      const recMap = new Map(recs.map((r) => [r.item_code, r.status]))
+      const recMap = latestRecordsByItem(recs)
       return {
         unit_id: u.id,
         unit_name: u.name,
@@ -134,7 +137,7 @@ export const useCpStore = defineStore('cp', () => {
         items: itemsDef.map((it) => ({
           code: it.code,
           name: it.name,
-          status: (recMap.get(it.code) ?? 'pending') as RecordStatus,
+          status: (recMap.get(it.code)?.status ?? 'pending') as RecordStatus,
         })),
       }
     })
@@ -154,7 +157,9 @@ export const useCpStore = defineStore('cp', () => {
   }
 
   function getItemStatus(unitId: number, code: string) {
-    const rec = records.value.find((r) => r.unit_id === unitId && r.item_code === code)
+    const rec = [...records.value]
+      .filter((r) => r.unit_id === unitId && r.item_code === code)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
     return rec?.status || 'pending'
   }
 
@@ -177,7 +182,7 @@ export const useCpStore = defineStore('cp', () => {
   }
 
   return {
-    pipelines, units, points, records, dashboard, items, loading,
+    pipelines, units, points, records, dashboard, items, loading, loadError,
     facilities, selectedUnit, hoveredUnit, stats,
     loadAll, refreshRecords, unitName, getItemStatus, selectUnit, hoverUnit,
     unitJointCount, unitInletCount,

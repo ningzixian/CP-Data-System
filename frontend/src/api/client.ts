@@ -5,7 +5,6 @@
  * 真实后端地址：VITE_API_BASE_URL
  */
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
-import { ElMessage } from 'element-plus'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'  // 默认 true
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
@@ -18,9 +17,8 @@ const http: AxiosInstance = axios.create({
 http.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (USE_MOCK) return Promise.reject(err)
-    const msg = err.response?.data?.detail || err.response?.data?.message || err.message
-    if (msg) ElMessage.error(msg)
+    const msg = err.response?.data?.detail || err.response?.data?.message
+    if (msg && err instanceof Error) err.message = msg
     return Promise.reject(err)
   },
 )

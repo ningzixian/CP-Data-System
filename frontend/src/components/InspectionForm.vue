@@ -3,7 +3,7 @@ import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { recordsApi } from '@/api/records'
 import { useCpStore } from '@/stores/cp'
-import type { InspectionItemDef, InspectionRecord, InspectionItemCode } from '@/types/models'
+import type { InspectionItemDef, InspectionItemCode, InspectionRecordInput } from '@/types/models'
 
 const props = defineProps<{
   unitId: number
@@ -13,7 +13,19 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'saved'): void }>()
 
 const store = useCpStore()
-const form = reactive<any>({
+type InspectionFormState = Omit<
+  InspectionRecordInput,
+  'unit_id' | 'item_code' | 'point_id' | 'work_hours' | 'measured_value' | 'inspection_date' | 'result_data'
+> & {
+  point_id: number | null
+  work_hours: number | null
+  measured_value: number | null
+  inspection_date: string
+  result_data: Record<string, unknown>
+}
+
+function defaultForm(): InspectionFormState {
+  return {
   point_id: null,
   work_hours: null,
   personnel_count: 2,
@@ -21,19 +33,37 @@ const form = reactive<any>({
   inspector: '',
   status: 'pending',
   result_summary: '',
-  result_data: {} as Record<string, any>,
+  result_data: {},
   measured_value: null,
   unit: '',
   bd_coord: '',
   note: '',
   inspection_date: new Date().toISOString(),
-})
+  }
+}
+
+const form = reactive<InspectionFormState>(defaultForm())
 const recordId = ref<number | null>(null)
+const loading = ref(false)
+const saving = ref(false)
+let loadSequence = 0
+
+function resetForm() {
+  Object.assign(form, defaultForm())
+  recordId.value = null
+}
 
 async function load() {
-  const list = await recordsApi.list({ unit_id: props.unitId, item_code: props.item.code as InspectionItemCode })
+  const sequence = ++loadSequence
+  const unitId = props.unitId
+  const itemCode = props.item.code as InspectionItemCode
+  resetForm()
+  loading.value = true
+  try {
+  const list = await recordsApi.list({ unit_id: unitId, item_code: itemCode })
+  if (sequence !== loadSequence || unitId !== props.unitId || itemCode !== props.item.code) return
   if (list.length > 0) {
-    const r = list[0]
+    const r = [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
     recordId.value = r.id
     Object.assign(form, {
       point_id: r.point_id ?? null,
@@ -50,14 +80,28 @@ async function load() {
       note: r.note,
       inspection_date: r.inspection_date ?? new Date().toISOString(),
     })
-  } else {
-    recordId.value = null
+  }
+  } catch (e: unknown) {
+    if (sequence === loadSequence) {
+      ElMessage.error('加载检测记录失败：' + (e instanceof Error ? e.message : '未知错误'))
+    }
+  } finally {
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
 async function save() {
+  if (saving.value) return
+  saving.value = true
   try {
-    const payload = { ...form, unit_id: props.unitId, item_code: props.item.code }
+    const payload: InspectionRecordInput = {
+      ...form,
+      point_id: form.point_id ?? undefined,
+      work_hours: form.work_hours ?? undefined,
+      measured_value: form.measured_value ?? undefined,
+      unit_id: props.unitId,
+      item_code: props.item.code,
+    }
     if (recordId.value) {
       await recordsApi.update(recordId.value, payload)
     } else {
@@ -67,8 +111,10 @@ async function save() {
     await store.refreshRecords()
     emit('saved')
     await load()
-  } catch (e: any) {
-    ElMessage.error('保存失败：' + (e?.message || '未知错误'))
+  } catch (e: unknown) {
+    ElMessage.error('保存失败：' + (e instanceof Error ? e.message : '未知错误'))
+  } finally {
+    saving.value = false
   }
 }
 
@@ -78,7 +124,7 @@ watch(() => [props.unitId, props.item.code], load)
 
 <template>
   <div class="inspection-form">
-    <el-form label-width="120px" v-loading="false">
+    <el-form label-width="120px" v-loading="loading">
       <el-row :gutter="20">
         <el-col :span="12">
           <el-form-item label="检测员">
@@ -159,7 +205,7 @@ watch(() => [props.unitId, props.item.code], load)
       </el-form-item>
 
       <el-form-item>
-        <el-button type="primary" @click="save">保存</el-button>
+        <el-button type="primary" :loading="saving" :disabled="loading" @click="save">保存</el-button>
         <el-button v-if="recordId" disabled>已存在记录 ID #{{ recordId }}</el-button>
       </el-form-item>
     </el-form>

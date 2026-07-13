@@ -3,7 +3,7 @@
  * 用于加载南海家园七里的现场设施数据（来自 GIS 导出）
  */
 
-/** 解析 CSV 行（支持引号包裹的字段，含逗号或换行） */
+/** 解析单行 CSV（支持引号包裹的逗号和双引号）。 */
 export function parseCSVLine(line: string): string[] {
   const result: string[] = []
   let cur = ''
@@ -28,15 +28,47 @@ export function parseCSVLine(line: string): string[] {
   return result
 }
 
+/** 按完整文本解析 CSV，保留引号字段内部的换行。 */
+export function parseCSVRows(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') {
+        field += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      row.push(field)
+      field = ''
+    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      if (ch === '\r' && text[i + 1] === '\n') i++
+      row.push(field)
+      if (row.some((cell) => cell.trim())) rows.push(row)
+      row = []
+      field = ''
+    } else {
+      field += ch
+    }
+  }
+  row.push(field)
+  if (row.some((cell) => cell.trim())) rows.push(row)
+  return rows
+}
+
 /** 解析 CSV 文本为对象数组 */
 export function parseCSV(text: string): Record<string, string>[] {
   // 去掉 BOM
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
-  const lines = text.split(/\r?\n/).filter((l) => l.trim())
-  if (lines.length === 0) return []
-  const headers = parseCSVLine(lines[0]).map((h) => h.trim())
-  return lines.slice(1).map((line) => {
-    const cells = parseCSVLine(line)
+  const rows = parseCSVRows(text)
+  if (rows.length === 0) return []
+  const headers = rows[0].map((h) => h.trim())
+  return rows.slice(1).map((cells) => {
     const obj: Record<string, string> = {}
     headers.forEach((h, i) => {
       obj[h] = (cells[i] ?? '').trim()
@@ -81,7 +113,7 @@ export function parseWKTPolygon(wkt: string): Array<Array<[number, number]>> {
   const body = multiPolygon?.[1] ?? polygon?.[1]
   if (!body) return []
   const rings: Array<Array<[number, number]>> = []
-  const ringRe = multiPolygon ? /\(\(\s*([^\(\)]+?)\s*\)\)/g : /\(\s*([^\(\)]+?)\s*\)/g
+  const ringRe = multiPolygon ? /\(\(\s*([^()]+?)\s*\)\)/g : /\(\s*([^()]+?)\s*\)/g
   let r
   while ((r = ringRe.exec(body)) !== null) {
     const coords = r[1]

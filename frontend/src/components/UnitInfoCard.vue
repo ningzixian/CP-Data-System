@@ -21,7 +21,7 @@ import { useCpStore } from '@/stores/cp'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/items'
 import { polygonAreaM2 } from '@/utils/geo'
 
-const props = defineProps<{
+defineProps<{
   /** 是否显示卡片 —— 由父组件(MapPage)控制,跟 el-drawer 互斥
    *  - false → 内部 <aside> v-if 为 false,Transition 跑 leave 动画
    *  - true + 有选中单元 → 显示
@@ -37,12 +37,6 @@ const emit = defineEmits<{
 const store = useCpStore()
 
 const unit = computed(() => store.selectedUnit)
-/** 内部 aside 的 v-if 条件:visible prop + 有选中单元
- *  - 用 computed 包一下,让模板里 v-if 读起来更清晰
- *  - 组件本身常驻,只在两个条件同时成立时才显示
- */
-const isOpen = computed(() => !!props.visible && !!unit.value)
-
 const progressPct = computed(() =>
   unit.value ? Math.round(unit.value.inspection_progress * 100) : 0,
 )
@@ -99,14 +93,6 @@ const pipeLengthM = computed(() => {
   return Math.round(total).toLocaleString('zh-CN')
 })
 
-function getItemStatus(code: string): string {
-  if (!unit.value) return 'pending'
-  return store.getItemStatus(unit.value.id, code)
-}
-
-function itemStatusLabel(status: string): string {
-  return STATUS_LABELS[status] || '待开始'
-}
 </script>
 
 <template>

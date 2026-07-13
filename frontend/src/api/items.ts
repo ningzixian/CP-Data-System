@@ -9,7 +9,8 @@ import { request } from './client'
 export async function fetchItems(): Promise<InspectionItemDef[]> {
   try {
     return await request<InspectionItemDef[]>({ url: '/api/items' })
-  } catch {
+  } catch (error) {
+    console.warn('[Items] 动态检测项加载失败，使用前端静态定义：', error)
     return INSPECTION_ITEMS
   }
 }

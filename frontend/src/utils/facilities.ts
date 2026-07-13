@@ -117,31 +117,24 @@ async function loadCommunityData(community: string): Promise<{
   inlets: CsvInlet[]
   boundary?: CommunityBoundary
 }> {
-  try {
+  async function fetchCsv(suffix: string, required = true): Promise<string> {
+    try {
+      const response = await fetch(`${BASE}/${community}-${suffix}.csv`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return await response.text()
+    } catch (error) {
+      if (required) console.warn(`[Facilities] ${community}-${suffix}.csv 加载失败：`, error)
+      return ''
+    }
+  }
+
     const [jointsText, pipesText, regulatorsText, inletsText, unitsText, boundaryText] = await Promise.all([
-      fetch(`${BASE}/${community}-绝缘接头.csv`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
-      }),
-      fetch(`${BASE}/${community}-低压.csv`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
-      }),
-      fetch(`${BASE}/${community}-调压箱.csv`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
-      }),
-      fetch(`${BASE}/${community}-引入口_录入.csv`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
-      }),
-      fetch(`${BASE}/${community}-控制单元.csv`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.text()
-      }),
-      fetch(`${BASE}/${community}-边界.csv`)
-        .then((r) => r.ok ? r.text() : '')
-        .catch(() => ''),
+      fetchCsv('绝缘接头'),
+      fetchCsv('低压'),
+      fetchCsv('调压箱'),
+      fetchCsv('引入口_录入'),
+      fetchCsv('控制单元'),
+      fetchCsv('边界', false),
     ])
 
     // ============ 控制单元 ============
@@ -233,10 +226,6 @@ async function loadCommunityData(community: string): Promise<{
       : undefined
 
     return { community, rawUnits, joints, pipes, regulators, inlets, boundary }
-  } catch (err) {
-    console.warn(`[Facilities] 跳过小区 ${community}(加载失败):`, err)
-    return { rawUnits: [], joints: [], pipes: [], regulators: [], inlets: [] }
-  }
 }
 
 function coordKey(lng: number, lat: number): string {

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { loadAMap } from '@/map/amap-loader'
+import { escapeHtml as e } from '@/utils/html'
 import type { CsvInlet, CsvPipe } from '@/utils/facilities'
 import type { SurveyEndpointId, SurveyLine, SurveyPoint, SurveyPointType } from '@/types/survey'
 
@@ -155,7 +156,7 @@ function renderPipes() {
   props.pipes.forEach((pipe) => {
     if (pipe.coords.length < 2) return
     const line = new AMapApi.Polyline({ path: pipe.coords, ...PIPE_STYLE })
-    bindTip(line, `<b>${pipe.pipeno || `#${pipe.fid}`}</b><br>管材：${pipe.material || '—'}　外径：${pipe.diametero || '—'}mm<br>壁厚：${pipe.thickness || '—'}mm　长度：${pipe.length || '—'}m<br>压力：${pipe.pressured || '—'}`)
+    bindTip(line, `<b>${e(pipe.pipeno || `#${pipe.fid}`)}</b><br>管材：${e(pipe.material || '—')} | 外径：${e(pipe.diametero || '—')}mm<br>壁厚：${e(pipe.thickness || '—')}mm | 长度：${e(pipe.length || '—')}m<br>压力：${e(pipe.pressured || '—')}`)
     addLayer('pipe', line)
   })
   toggleLayer('pipe', props.visible)
@@ -179,7 +180,7 @@ function renderInlets() {
       event.stopPropagation()
       handleEndpointClick(`inlet:${inlet.fid}`, [inlet.lng, inlet.lat])
     })
-    bindTip(item, `<b>引入口 ${inlet.ecode}</b><br>压力：${inlet.pressured || '—'}<br>管号：${inlet.pipeno || '—'}`)
+    bindTip(item, `<b>引入口 ${e(inlet.ecode)}</b><br>压力：${e(inlet.pressured || '—')}<br>管号：${e(inlet.pipeno || '—')}`)
     addLayer('inlet', item)
   })
   toggleLayer('inlet', props.inletsVisible)
@@ -198,7 +199,7 @@ function renderSurveyPoints() {
       else emit('point-click', point.id)
     })
     const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : '普通点位'
-    bindTip(item, `<b>${point.id}</b> (${type}${point.type !== 'straight' ? ` ${point.rotation}°` : ''})<br>${point.depth !== undefined ? `埋深：${point.depth} m<br>` : ''}${point.current !== undefined ? `电流：${point.current}<br>` : ''}${point.note ? `备注：${point.note}` : ''}`)
+    bindTip(item, `<b>${e(point.id)}</b> (${type}${point.type !== 'straight' ? ` ${point.rotation}°` : ''})<br>${point.depth !== undefined ? `埋深：${e(point.depth)} m<br>` : ''}${point.current !== undefined ? `电流：${e(point.current)}<br>` : ''}${point.note ? `备注：${e(point.note)}` : ''}`)
     addLayer('point', item)
     pointMarkerMap.set(point.id, item)
   })
@@ -208,7 +209,7 @@ function renderSurveyPoints() {
 function openLineMenu(line: SurveyLine, from: [number, number], to: [number, number]) {
   if (props.mode !== 'view') return
   const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
-  menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">${line.id}</div><div class="survey-line-menu-meta">${line.fromId} → ${line.toId}</div><button class="survey-line-menu-btn danger" data-line-action="remove" data-line-id="${line.id}"><span class="icon">🗑</span>删除该管线</button></div>`)
+  menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">${e(line.id)}</div><div class="survey-line-menu-meta">${e(line.fromId)} → ${e(line.toId)}</div><button class="survey-line-menu-btn danger" data-line-action="remove" data-line-id="${e(line.id)}"><span class="icon">🗑</span>删除该管线</button></div>`)
   menuWindow.open(map, mid)
 }
 
@@ -317,7 +318,7 @@ function renderSurveyLines() {
     const to = resolveEndpoint(lineData.toId)
     if (!from || !to) return
     const line = new AMapApi.Polyline({ path: [from, to], ...SURVEY_LINE_STYLE, bubble: false })
-    bindTip(line, `<b>${lineData.id}</b><br>${lineData.fromId} → ${lineData.toId}`)
+    bindTip(line, `<b>${e(lineData.id)}</b><br>${e(lineData.fromId)} → ${e(lineData.toId)}`)
     addLayer('line', line)
     // AMap Canvas 对 3px 细线的命中范围较小，增加透明宽热区提升点击可用性。
     const hitArea = new AMapApi.Polyline({
@@ -329,7 +330,7 @@ function renderSurveyLines() {
       cursor: 'pointer',
       bubble: false,
     })
-    bindTip(hitArea, `<b>${lineData.id}</b><br>${lineData.fromId} → ${lineData.toId}`)
+    bindTip(hitArea, `<b>${e(lineData.id)}</b><br>${e(lineData.fromId)} → ${e(lineData.toId)}`)
     addLayer('line', hitArea)
     const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
     const angle = Math.atan2(to[0] - from[0], to[1] - from[1]) * 180 / Math.PI
