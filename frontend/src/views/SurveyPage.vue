@@ -12,7 +12,7 @@ import { ElMessage } from 'element-plus'
 import { useCpStore } from '@/stores/cp'
 import { useSurveyStore } from '@/stores/survey'
 import SurveyMapView from '@/components/SurveyMapView.vue'
-import type { SurveyPoint, SurveyPointType, SurveyEndpointId } from '@/types/survey'
+import type { SurveyPoint, SurveyPointType, SurveyEndpointId, SurveyBox } from '@/types/survey'
 
 const store = useCpStore()
 const survey = useSurveyStore()
@@ -21,7 +21,7 @@ const mapRef = ref<InstanceType<typeof SurveyMapView> | null>(null)
 // ========== 当前激活的小区 ==========
 const SURVEY_COMMUNITY = '南海家园三里'
 /** 现场打点 CSV 路径 */
-const SURVEY_CSV_URL = `${import.meta.env.BASE_URL}data/Pipe detection data/南海家园三里检测点坐标_20260710132027.csv`
+const SURVEY_CSV_URL = `${import.meta.env.BASE_URL}data/Pipe detection data/南海家园三里_2026-7-14-13-51-13（增加经纬度）.csv`
 
 // ========== 数据筛选:只取南海家园三里 ==========
 const surveyPipes = computed(() => {
@@ -51,8 +51,15 @@ const surveyStats = computed(() => ({
   lineCount: survey.lines.length,
 }))
 
+/** 左侧点位列表按编号末尾数字升序展示。 */
+const sortedSurveyPoints = computed(() => [...survey.points].sort((a, b) => {
+  const aNumber = Number(a.id.match(/(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER)
+  const bNumber = Number(b.id.match(/(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER)
+  return aNumber - bNumber || a.id.localeCompare(b.id)
+}))
+
 // ========== 模式 / 编辑状态 ==========
-const mode = ref<'view' | 'add-point' | 'connect'>('view')
+const mode = ref<'view' | 'add-point' | 'connect' | 'edit' | 'box'>('view')
 /** 当前正在编辑的点位 id(传给 SurveyMapView 让它显示编辑浮层) */
 const editingPointId = ref<string | null>(null)
 /** 列表里选中的点位(高亮,不一定要编辑) */
@@ -66,6 +73,7 @@ function onRedo() { survey.redo() }
 function switchMode(next: typeof mode.value) {
   // 切换模式时,关闭可能开着的编辑面板
   if (editingPointId.value) editingPointId.value = null
+  mapRef.value?.clearPointInfo()
   mode.value = next
 }
 
@@ -81,14 +89,27 @@ function onCreatePoint(payload: { lat: number; lng: number; type: SurveyPointTyp
 }
 
 function onPointClick(id: string) {
-  // view 模式点击 marker → 进入编辑
-  mapRef.value?.focusPoint(id)
   selectedPointId.value = id
-  editingPointId.value = id
+  if (mode.value === 'view') {
+    editingPointId.value = null
+    mapRef.value?.showPointInfo(id)
+    return
+  }
+  mapRef.value?.clearPointInfo()
+  mapRef.value?.focusPoint(id)
+  editingPointId.value = mode.value === 'edit' ? id : null
 }
 
 function onListPointClick(id: string) {
   onPointClick(id)
+}
+
+function pointTypeLabel(type: SurveyPointType) {
+  if (type === 'tee') return '三通'
+  if (type === 'elbow') return '弯头'
+  if (type === 'joint') return '绝缘接头'
+  if (type === 'inlet') return '引入口'
+  return '普通'
 }
 
 function onUpdatePoint(payload: { id: string; patch: Partial<SurveyPoint> }) {
@@ -116,6 +137,18 @@ function onRemoveLine(id: string) {
   survey.removeLine(id)
 }
 
+function onCreateBox(bounds: Omit<SurveyBox, 'id' | 'createdAt'>) {
+  survey.addBox(bounds)
+}
+
+function onRemoveBox(id: string) {
+  survey.removeBox(id)
+}
+
+function onUpdateBox(payload: { id: string; bounds: Omit<SurveyBox, 'id' | 'createdAt'> }) {
+  survey.updateBox(payload.id, payload.bounds)
+}
+
 // ========== 图例显隐 ==========
 const pipeVisible = ref(true)
 const inletVisible = ref(true)
@@ -138,7 +171,7 @@ onMounted(async () => {
   <div class="main-content">
     <!-- 左侧菜单栏:工具栏 + 可折叠小区点位列表 -->
     <div class="side-panel survey-side-panel">
-      <!-- 工具栏:模式 + 撤销/重做 -->
+      <!-- 工具栏:模式 + 编辑工具 + 撤销/重做 -->
       <div class="survey-toolbar">
         <div class="survey-toolbar-row">
           <button
@@ -159,6 +192,20 @@ onMounted(async () => {
             @click="switchMode('connect')"
             title="点一个点位拖到另一个点位,松手生成管线"
           >🔗 连线</button>
+        </div>
+        <div class="survey-toolbar-row">
+          <button
+            class="survey-tool-btn"
+            :class="{ active: mode === 'edit' }"
+            @click="switchMode('edit')"
+            title="拖动勘测点位调整位置"
+          >✥ 编辑</button>
+          <button
+            class="survey-tool-btn"
+            :class="{ active: mode === 'box' }"
+            @click="switchMode('box')"
+            title="在地图上拖动绘制红色虚线标识框"
+          >▧ 框选</button>
         </div>
         <div class="survey-toolbar-row">
           <button
@@ -202,7 +249,7 @@ onMounted(async () => {
           <div v-else>暂无点位</div>
         </div>
         <div
-          v-for="p in survey.points"
+          v-for="p in sortedSurveyPoints"
           :key="p.id"
           class="survey-point-row"
           :class="{ active: selectedPointId === p.id }"
@@ -215,7 +262,7 @@ onMounted(async () => {
           ></span>
           <span class="survey-point-id">{{ p.id }}</span>
           <span class="survey-point-type">
-            {{ p.type === 'tee' ? '三通' : p.type === 'elbow' ? '弯头' : '普通' }}
+            {{ pointTypeLabel(p.type) }}
           </span>
         </div>
         </div>
@@ -233,6 +280,7 @@ onMounted(async () => {
         :regulators="surveyRegulators"
         :survey-points="survey.points"
         :survey-lines="survey.lines"
+        :survey-boxes="survey.boxes"
         :visible="pipeVisible"
         :inlets-visible="inletVisible"
         :units-visible="unitVisible"
@@ -249,13 +297,16 @@ onMounted(async () => {
         @close-editor="onCloseEditor"
         @create-line="onCreateLine"
         @remove-line="onRemoveLine"
+        @create-box="onCreateBox"
+        @update-box="onUpdateBox"
+        @remove-box="onRemoveBox"
       />
 
       <div class="map-legend">
         <div class="legend-section legend-section--readonly">
           <div><span class="dot" style="background:#67c23a"></span>燃气管线</div>
           <div><span class="dot" style="background:#909399"></span>引入口</div>
-          <div><span class="dot" style="background:#7c3aed"></span>勘测管线</div>
+          <div><span class="dot" style="background:#7a3e2e"></span>勘测管线</div>
           <div><span class="dot" style="background:#e6a23c"></span>勘测点位</div>
         </div>
         <div class="legend-section legend-section--toggle">

@@ -275,7 +275,7 @@ html, body, #app {
   border-bottom: 1px solid #ebeef5;
 }
 
-/* 管线勘测的五个编辑按钮始终吸附在侧栏顶部。 */
+/* 管线勘测工具按钮始终吸附在侧栏顶部。 */
 .survey-side-panel > .survey-toolbar {
   position: sticky;
   top: 0;
@@ -359,6 +359,16 @@ html, body, #app {
 }
 .survey-point-type-dot.type-straight.source-manual {
   background: #409eff;  /* source=manual:蓝色 */
+}
+.survey-point-type-dot.type-joint {
+  border-radius: 0;
+  background: #f56c6c;
+  clip-path: polygon(0 20%, 20% 0, 50% 30%, 80% 0, 100% 20%, 70% 50%, 100% 80%, 80% 100%, 50% 70%, 20% 100%, 0 80%, 30% 50%);
+}
+.survey-point-type-dot.type-inlet {
+  border-radius: 1px;
+  background: #909399;
+  transform: rotate(45deg);
 }
 .survey-point-id {
   font-weight: 600;
@@ -449,7 +459,23 @@ html, body, #app {
   cursor: crosshair !important;
 }
 
-/* view 模式:拖动点位时光标(已禁用,占位) */
+.mode-box .amap-container,
+.mode-box .amap-maps,
+.mode-box .amap-overlays {
+  cursor: crosshair !important;
+}
+
+.mode-edit .survey-point-marker,
+.mode-edit .survey-point-marker * {
+  cursor: pointer !important;
+}
+
+.mode-edit .survey-point-marker:active,
+.mode-edit .survey-point-marker:active *,
+.mode-edit .survey-point-marker.is-dragging,
+.mode-edit .survey-point-marker.is-dragging * {
+  cursor: move !important;
+}
 
 /* ============ Survey Map:add-point 三选菜单 popup ============ */
 .survey-add-menu {
@@ -499,6 +525,12 @@ html, body, #app {
 }
 .survey-add-menu-icon.type-straight {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><circle cx='14' cy='14' r='5' fill='%23e6a23c' stroke='%23fff' stroke-width='2'/></svg>");
+}
+.survey-add-menu-icon.type-joint {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><line x1='7' y1='7' x2='21' y2='21' stroke='%23f56c6c' stroke-width='4' stroke-linecap='round'/><line x1='21' y1='7' x2='7' y2='21' stroke='%23f56c6c' stroke-width='4' stroke-linecap='round'/><circle cx='14' cy='14' r='3' fill='%23fff' stroke='%23f56c6c' stroke-width='2'/></svg>");
+}
+.survey-add-menu-icon.type-inlet {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'><path d='M14 3 L25 14 L14 25 L3 14 Z' fill='%23909399' stroke='%23fff' stroke-width='2'/><circle cx='14' cy='14' r='3' fill='%23fff'/></svg>");
 }
 
 /* ============ Survey Map:编辑浮层(右侧滑入) ============ */
@@ -676,6 +708,10 @@ html, body, #app {
 .survey-line-menu-btn.danger:hover {
   background: #fef0f0;
   color: #f56c6c;
+}
+.survey-line-menu-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .survey-line-menu-btn .icon {
   font-size: 13px;
@@ -875,6 +911,11 @@ html, body, #app {
   background: #efe5ff;
   box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
 }
+.survey-photo-add-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  box-shadow: none;
+}
 .survey-photo-hint,
 .survey-photo-selection {
   margin-top: 6px;
@@ -889,8 +930,71 @@ html, body, #app {
   white-space: nowrap;
 }
 
+.survey-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.survey-photo-item {
+  position: relative;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #e4e7ed;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.survey-photo-preview {
+  display: block;
+  height: 58px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #f2f3f5;
+}
+
+.survey-photo-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 0.18s ease;
+}
+
+.survey-photo-preview:hover img {
+  transform: scale(1.06);
+}
+
+.survey-photo-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f56c6c;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 16px;
+  box-shadow: 0 2px 6px rgba(245, 108, 108, 0.3);
+}
+
+.survey-photo-name {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #606266;
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .amap-business-tip:has(.survey-point-hover-card) {
-  width: 340px;
+  width: 315px;
   padding: 0;
   overflow: hidden;
   border: 0;
@@ -926,8 +1030,8 @@ html, body, #app {
   display: grid;
   grid-template-columns: 42px 1fr;
   gap: 5px 10px;
-  margin-top: 12px;
-  font-size: 14px;
+  margin-top: 22px;
+  font-size: 18px;
   line-height: 1.4;
 }
 .survey-point-hover-data span {
@@ -966,6 +1070,48 @@ html, body, #app {
   color: #a8a2b8;
   font-size: 11px;
   font-weight: 400;
+}
+
+.survey-point-hover-photo.has-photos {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #e4e7ed;
+}
+
+.survey-point-hover-photo-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 2px;
+  background: #fff;
+}
+
+.survey-point-hover-photo-grid.photo-count-1 {
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
+.survey-point-hover-photo-grid.photo-count-2 {
+  grid-template: repeat(2, minmax(0, 1fr)) / minmax(0, 1fr);
+}
+
+.survey-point-hover-photo-grid.photo-count-3,
+.survey-point-hover-photo-grid.photo-count-4 {
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
+}
+
+.survey-point-hover-photo-grid.photo-count-3 img:first-child {
+  grid-column: 1 / -1;
+}
+
+.survey-point-hover-photo-grid img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  object-fit: cover;
+  background: #e4e7ed;
 }
 
 /* 纯悬停提示不得挡住 Marker/Polyline 的点击；带按钮的菜单不受此规则影响。 */

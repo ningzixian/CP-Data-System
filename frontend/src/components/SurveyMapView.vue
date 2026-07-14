@@ -3,9 +3,16 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { loadAMap } from '@/map/amap-loader'
 import { escapeHtml as e } from '@/utils/html'
+import {
+  addSurveyPhotos,
+  deleteSurveyPhoto,
+  deleteSurveyPhotos,
+  listSurveyPhotos,
+  type SurveyPhotoRecord,
+} from '@/utils/surveyPhotos'
 import type { CsvInlet, CsvJoint, CsvPipe, CsvRegulator } from '@/utils/facilities'
 import type { CorrosionUnit } from '@/types/models'
-import type { SurveyEndpointId, SurveyLine, SurveyPoint, SurveyPointType } from '@/types/survey'
+import type { SurveyBox, SurveyEndpointId, SurveyLine, SurveyPoint, SurveyPointType } from '@/types/survey'
 
 const props = defineProps<{
   pipes: CsvPipe[]
@@ -15,6 +22,7 @@ const props = defineProps<{
   regulators: CsvRegulator[]
   surveyPoints: SurveyPoint[]
   surveyLines: SurveyLine[]
+  surveyBoxes: SurveyBox[]
   visible: boolean
   inletsVisible: boolean
   unitsVisible: boolean
@@ -22,7 +30,7 @@ const props = defineProps<{
   regulatorsVisible: boolean
   surveyPointsVisible: boolean
   surveyLinesVisible: boolean
-  mode: 'view' | 'add-point' | 'connect'
+  mode: 'view' | 'add-point' | 'connect' | 'edit' | 'box'
   editingPointId: string | null
 }>()
 
@@ -34,6 +42,9 @@ const emit = defineEmits<{
   (e: 'close-editor'): void
   (e: 'create-line', payload: { fromId: SurveyEndpointId; toId: SurveyEndpointId }): void
   (e: 'remove-line', id: string): void
+  (e: 'create-box', bounds: Omit<SurveyBox, 'id' | 'createdAt'>): void
+  (e: 'update-box', payload: { id: string; bounds: Omit<SurveyBox, 'id' | 'createdAt'> }): void
+  (e: 'remove-box', id: string): void
 }>()
 
 const mapRef = ref<HTMLDivElement | null>(null)
@@ -43,13 +54,17 @@ let map: any = null
 let tipWindow: any = null
 let menuWindow: any = null
 
-type LayerKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet' | 'point' | 'line' | 'arrow' | 'temp'
+type LayerKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet' | 'point' | 'line' | 'arrow' | 'box' | 'temp'
 const layers: Record<LayerKey, any[]> = {
-  unit: [], pipe: [], joint: [], regulator: [], inlet: [], point: [], line: [], arrow: [], temp: [],
+  unit: [], pipe: [], joint: [], regulator: [], inlet: [], point: [], line: [], arrow: [], box: [], temp: [],
 }
 const pointMarkerMap = new Map<string, any>()
 const unitPolygonMap = new Map<number, any>()
+const boxOverlayMap = new Map<string, any>()
+let focusedPointId: string | null = null
 let selectedUnitId: number | null = null
+let selectedBoxId: string | null = null
+let boxDeleteEnableSequence = 0
 type SelectableFacilityKind = 'pipe' | 'joint' | 'regulator' | 'inlet'
 let selectedFacility: { kind: SelectableFacilityKind; overlay: any; element?: HTMLElement } | null = null
 let suppressNextMapClear = false
@@ -57,13 +72,16 @@ let suppressNextMapClear = false
 let connectPendingFrom: SurveyEndpointId | null = null
 let connectPendingPosition: [number, number] | null = null
 let connectTempLine: any = null
+let suppressPointClickUntil = 0
 const SNAP_PX = 50
 const FACILITY_FOCUS_ZOOM = 19
 
 const PIPE_STYLE = { strokeColor: '#67c23a', strokeWeight: 3, strokeOpacity: 0.75, lineCap: 'round', lineJoin: 'round', zIndex: 300 }
 const PIPE_ACTIVE_STYLE = { strokeColor: '#8B4513', strokeWeight: 6, strokeOpacity: 1, zIndex: 810 }
-const SURVEY_LINE_STYLE = { strokeColor: '#7c3aed', strokeWeight: 4, strokeOpacity: 0.95, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
+const SURVEY_LINE_STYLE = { strokeColor: '#7a3e2e', strokeWeight: 4, strokeOpacity: 1, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
 const TEMP_LINE_STYLE = { strokeColor: '#409eff', strokeWeight: 3, strokeOpacity: 0.85, strokeStyle: 'dashed', strokeDasharray: [4, 4], zIndex: 700 }
+const SURVEY_BOX_STYLE = { strokeColor: '#ff0000', strokeWeight: 2, strokeOpacity: 1, strokeStyle: 'dashed', strokeDasharray: [8, 6], fillColor: '#ff0000', fillOpacity: 0.05, zIndex: 490 }
+const SURVEY_BOX_SELECTED_STYLE = { ...SURVEY_BOX_STYLE, strokeWeight: 4, fillOpacity: 0.1, zIndex: 740 }
 
 function contentElement(className: string, html: string) {
   const element = document.createElement('div')
@@ -72,15 +90,17 @@ function contentElement(className: string, html: string) {
   return element
 }
 
-function createMarker(position: [number, number], className: string, html: string, zIndex: number, clickable = true) {
+function createMarker(position: [number, number], className: string, html: string, zIndex: number, clickable = true, draggable = false) {
   const content = contentElement(className, html)
   // AMap 自定义 Marker 的按下事件会继续落到地图画布，短点击可能让地图残留在拖拽状态。
   // 只拦截拖拽起始事件，click 仍交给 Marker 的 AMap 事件处理。
   const stopMapDrag = (event: Event) => event.stopPropagation()
-  content.addEventListener('pointerdown', stopMapDrag)
-  content.addEventListener('mousedown', stopMapDrag)
-  content.addEventListener('touchstart', stopMapDrag, { passive: true })
-  const item = new AMapApi.Marker({ position, content, anchor: 'center', zIndex, clickable, bubble: false })
+  if (!draggable) {
+    content.addEventListener('pointerdown', stopMapDrag)
+    content.addEventListener('mousedown', stopMapDrag)
+    content.addEventListener('touchstart', stopMapDrag, { passive: true })
+  }
+  const item = new AMapApi.Marker({ position, content, anchor: 'center', zIndex, clickable, draggable, cursor: 'pointer', bubble: false })
   ;(item as any).__content = content
   ;(item as any).__baseZIndex = zIndex
   return item
@@ -92,16 +112,20 @@ function pointIconHtml(point: SurveyPoint) {
     svg = '<line x1="14" y1="3" x2="14" y2="25" stroke="#303133" stroke-width="3"/><line x1="14" y1="14" x2="25" y2="14" stroke="#303133" stroke-width="3"/><circle cx="14" cy="14" r="3.5" fill="#fff" stroke="#303133" stroke-width="2"/>'
   } else if (point.type === 'elbow') {
     svg = '<line x1="14" y1="3" x2="14" y2="14" stroke="#303133" stroke-width="3"/><line x1="14" y1="14" x2="25" y2="14" stroke="#303133" stroke-width="3"/><circle cx="14" cy="14" r="3.5" fill="#fff" stroke="#303133" stroke-width="2"/>'
+  } else if (point.type === 'joint') {
+    svg = '<line x1="7" y1="7" x2="21" y2="21" stroke="#f56c6c" stroke-width="4" stroke-linecap="round"/><line x1="21" y1="7" x2="7" y2="21" stroke="#f56c6c" stroke-width="4" stroke-linecap="round"/><circle cx="14" cy="14" r="3" fill="#fff" stroke="#f56c6c" stroke-width="2"/>'
+  } else if (point.type === 'inlet') {
+    svg = '<path d="M14 3 L25 14 L14 25 L3 14 Z" fill="#909399" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="3" fill="#fff"/>'
   } else {
     const fill = point.source === 'manual' ? '#409eff' : '#e6a23c'
     svg = `<circle cx="14" cy="14" r="5" fill="${fill}" stroke="#fff" stroke-width="2"/>`
   }
-  const transform = point.type === 'straight' ? '' : `transform:rotate(${point.rotation}deg);transition:transform .15s`
+  const transform = point.type === 'tee' || point.type === 'elbow' ? `transform:rotate(${point.rotation}deg);transition:transform .15s` : ''
   return `<div class="survey-point-icon" style="width:28px;height:28px"><svg width="28" height="28" viewBox="0 0 28 28" style="${transform}">${svg}</svg></div>`
 }
 
 function arrowHtml(angle: number) {
-  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="14" height="14" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#7c3aed" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
+  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="14" height="14" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#7a3e2e" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
 }
 
 function addLayer(kind: LayerKey, overlay: any) {
@@ -123,12 +147,81 @@ function openTip(position: [number, number], html: string) {
   tipWindow?.open(map, position)
 }
 
+let pinnedSurveyPointId: string | null = null
+
 function bindTip(overlay: any, html: string) {
   overlay.on('mouseover', (event: any) => {
+    if (props.mode !== 'view' || pinnedSurveyPointId) return
     const pos = event.lnglat ?? overlay.getPosition?.() ?? overlay.getBounds?.()?.getCenter?.()
     if (pos) openTip([pos.getLng(), pos.getLat()], html)
   })
-  overlay.on('mouseout', () => tipWindow?.close())
+  overlay.on('mouseout', () => { if (!pinnedSurveyPointId) tipWindow?.close() })
+}
+
+let hoverPhotoLoadSequence = 0
+let hoverPhotoUrls: string[] = []
+
+function releaseHoverPhotoUrls() {
+  hoverPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
+  hoverPhotoUrls = []
+}
+
+function surveyPointTipHtml(point: SurveyPoint, photoContent: string): string {
+  const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : point.type === 'joint' ? '绝缘接头' : point.type === 'inlet' ? '引入口' : '普通点位'
+  return `<div class="survey-point-hover-card"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? e(point.current) : '未记录'}</strong></div>${point.note ? `<div class="survey-point-hover-note">${e(point.note)}</div>` : ''}</div>${photoContent}</div>`
+}
+
+function emptyHoverPhotoHtml(message: string): string {
+  return `<div class="survey-point-hover-photo"><div class="survey-point-hover-photo-icon">▧</div><span>照片留痕</span><small>${e(message)}</small></div>`
+}
+
+async function showSurveyPointTip(point: SurveyPoint, position: [number, number], pinned = false) {
+  const sequence = ++hoverPhotoLoadSequence
+  releaseHoverPhotoUrls()
+  if (pinned) pinnedSurveyPointId = point.id
+  openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('正在读取照片…')))
+  try {
+    const photos = await listSurveyPhotos(photoOwnerKey(point))
+    if (sequence !== hoverPhotoLoadSequence) return
+    if (photos.length === 0) {
+      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('暂无照片')))
+      return
+    }
+    const previewPhotos = photos.slice(0, 4).map((photo) => {
+      const url = URL.createObjectURL(photo.blob)
+      hoverPhotoUrls.push(url)
+      return `<img src="${e(url)}" alt="${e(photo.name)}" title="${e(photo.name)}">`
+    }).join('')
+    const photoContent = `<div class="survey-point-hover-photo has-photos"><div class="survey-point-hover-photo-grid photo-count-${previewPhotos.length}">${previewPhotos}</div></div>`
+    openTip(position, surveyPointTipHtml(point, photoContent))
+  } catch (error) {
+    if (sequence === hoverPhotoLoadSequence) {
+      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('照片读取失败')))
+    }
+    console.warn('[Survey] 点位照片读取失败：', error)
+  }
+}
+
+function clearPinnedSurveyPointTip() {
+  pinnedSurveyPointId = null
+  hoverPhotoLoadSequence++
+  releaseHoverPhotoUrls()
+  tipWindow?.close()
+}
+
+function bindSurveyPointTip(overlay: any, point: SurveyPoint) {
+  overlay.on('mouseover', (event: any) => {
+    if (props.mode !== 'view' || pinnedSurveyPointId) return
+    const pos = event.lnglat ?? overlay.getPosition?.()
+    if (!pos) return
+    void showSurveyPointTip(point, [pos.getLng(), pos.getLat()])
+  })
+  overlay.on('mouseout', () => {
+    if (pinnedSurveyPointId) return
+    hoverPhotoLoadSequence++
+    releaseHoverPhotoUrls()
+    tipWindow?.close()
+  })
 }
 
 function restoreMapDrag() {
@@ -207,6 +300,7 @@ function bindSelectableFacility(kind: SelectableFacilityKind, overlay: any, html
       element?.classList.add('hovered')
       overlay.setzIndex?.(810)
     }
+    if (props.mode !== 'view' || pinnedSurveyPointId) return
     const pos = event.lnglat ?? overlay.getPosition?.() ?? overlay.getBounds?.()?.getCenter?.()
     if (pos) openTip([pos.getLng(), pos.getLat()], html)
   })
@@ -218,7 +312,7 @@ function bindSelectableFacility(kind: SelectableFacilityKind, overlay: any, html
         overlay.setzIndex?.((overlay as any).__baseZIndex ?? 500)
       }
     }
-    tipWindow?.close()
+    if (!pinnedSurveyPointId) tipWindow?.close()
   })
   const select = () => {
     if (props.mode !== 'view') return
@@ -345,26 +439,51 @@ function renderInlets() {
 
 function renderSurveyPoints() {
   if (!map) return
+  hoverPhotoLoadSequence++
+  releaseHoverPhotoUrls()
   clearLayer('point')
   pointMarkerMap.clear()
   props.surveyPoints.forEach((point) => {
-    const item = createMarker([point.lng, point.lat], `survey-point-marker source-${point.source || 'csv'}`, pointIconHtml(point), 650)
+    const draggable = props.mode === 'edit'
+    const item = createMarker([point.lng, point.lat], `survey-point-marker source-${point.source || 'csv'}${draggable ? ' is-draggable' : ''}`, pointIconHtml(point), 650, true, draggable)
     ;((item as any).__content as HTMLElement).addEventListener('click', (event) => {
       event.stopPropagation()
-      if (props.mode === 'add-point') return
+      if (props.mode === 'add-point' || props.mode === 'box') return
+      if (props.mode === 'edit') {
+        if (performance.now() >= suppressPointClickUntil) emit('point-click', point.id)
+        return
+      }
       if (props.mode === 'connect') handleEndpointClick(`point:${point.id}`, [point.lng, point.lat])
       else emit('point-click', point.id)
     })
-    const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : '普通点位'
-    bindTip(item, `<div class="survey-point-hover-card"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? e(point.current) : '未记录'}</strong></div>${point.note ? `<div class="survey-point-hover-note">${e(point.note)}</div>` : ''}</div><div class="survey-point-hover-photo"><div class="survey-point-hover-photo-icon">▧</div><span>照片留痕</span><small>暂无照片</small></div></div>`)
+    if (draggable) {
+      item.on('dragstart', () => {
+        ;((item as any).__content as HTMLElement | undefined)?.classList.add('is-dragging')
+        tipWindow?.close()
+        menuWindow?.close()
+      })
+      item.on('dragend', (event: any) => {
+        ;((item as any).__content as HTMLElement | undefined)?.classList.remove('is-dragging')
+        const position = event.lnglat ?? item.getPosition?.()
+        if (!position) return
+        // 拖动结束后浏览器可能补发 click，短暂抑制，避免误开编辑卡片。
+        suppressPointClickUntil = performance.now() + 350
+        emit('update-point', {
+          id: point.id,
+          patch: { lng: position.getLng(), lat: position.getLat() },
+        })
+      })
+    }
+    bindSurveyPointTip(item, point)
     addLayer('point', item)
     pointMarkerMap.set(point.id, item)
   })
+  markFocusedPoint(focusedPointId)
   toggleLayer('point', props.surveyPointsVisible)
 }
 
 function openLineMenu(line: SurveyLine, from: [number, number], to: [number, number]) {
-  if (props.mode !== 'view') return
+  if (props.mode !== 'edit') return
   const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
   menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">${e(line.id)}</div><div class="survey-line-menu-meta">${e(line.fromId)} → ${e(line.toId)}</div><button class="survey-line-menu-btn danger" data-line-action="remove" data-line-id="${e(line.id)}"><span class="icon">🗑</span>删除该管线</button></div>`)
   menuWindow.open(map, mid)
@@ -376,6 +495,27 @@ let linePointerGesture: {
   startX: number
   startY: number
   hit: LineHit
+} | null = null
+let boxPointerGesture: {
+  pointerId: number
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  start: [number, number]
+  current: [number, number]
+  preview: any
+} | null = null
+let boxMoveGesture: {
+  pointerId: number
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  start: [number, number]
+  current: [number, number]
+  box: SurveyBox
+  overlay: any
 } | null = null
 let suppressLineClickUntil = 0
 
@@ -421,22 +561,197 @@ function stopLinePointerEvent(event: PointerEvent) {
   event.stopImmediatePropagation()
 }
 
-function onMapPointerDownCapture(event: PointerEvent) {
-  if (props.mode !== 'view' || event.button !== 0) return
+function findBoxAtClientPoint(clientX: number, clientY: number, borderOnly = false): { box: SurveyBox; overlay: any } | null {
+  if (!map || !mapRef.value) return null
+  const rect = mapRef.value.getBoundingClientRect()
+  const x = clientX - rect.left
+  const y = clientY - rect.top
+  for (let index = props.surveyBoxes.length - 1; index >= 0; index--) {
+    const box = props.surveyBoxes[index]
+    const overlay = boxOverlayMap.get(box.id)
+    if (!overlay) continue
+    const cornerA = map.lngLatToContainer([box.west, box.south])
+    const cornerB = map.lngLatToContainer([box.east, box.north])
+    const left = Math.min(cornerA.getX(), cornerB.getX())
+    const right = Math.max(cornerA.getX(), cornerB.getX())
+    const top = Math.min(cornerA.getY(), cornerB.getY())
+    const bottom = Math.max(cornerA.getY(), cornerB.getY())
+    if (x < left - 10 || x > right + 10 || y < top - 10 || y > bottom + 10) continue
+    const borderDistance = Math.min(Math.abs(x - left), Math.abs(x - right), Math.abs(y - top), Math.abs(y - bottom))
+    if (!borderOnly || borderDistance <= 10) return { box, overlay }
+  }
+  return null
+}
+
+function clientToLngLat(clientX: number, clientY: number): [number, number] | null {
+  if (!map || !mapRef.value) return null
+  const rect = mapRef.value.getBoundingClientRect()
+  const position = map.containerToLngLat(new AMapApi.Pixel(clientX - rect.left, clientY - rect.top))
+  return position ? [position.getLng(), position.getLat()] : null
+}
+
+function normalizedBox(start: [number, number], end: [number, number]): Omit<SurveyBox, 'id' | 'createdAt'> {
+  return {
+    west: Math.min(start[0], end[0]),
+    south: Math.min(start[1], end[1]),
+    east: Math.max(start[0], end[0]),
+    north: Math.max(start[1], end[1]),
+  }
+}
+
+function startBoxPointerGesture(event: PointerEvent) {
   const target = event.target as HTMLElement
-  // 点位和引入口优先处理自身点击，编辑面板/弹窗也不能被线命中逻辑截获。
-  if (target.closest('.survey-point-marker, .survey-inlet-marker, .joint-marker, .regulator-marker, .survey-editor-panel, .amap-info-window')) return
-  const hit = findLineAtClientPoint(event.clientX, event.clientY)
-  if (!hit) return
+  if (target.closest('.survey-point-marker, .survey-editor-panel, .survey-line-menu, .amap-info-window, .amap-info-contentContainer, .amap-control')) return
+  const start = clientToLngLat(event.clientX, event.clientY)
+  if (!start) return
   stopLinePointerEvent(event)
   map?.setStatus?.({ dragEnable: false })
-  linePointerGesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, hit }
+  clearLayer('temp')
+  const bounds = normalizedBox(start, start)
+  const preview = new AMapApi.Rectangle({ bounds: boxBounds(bounds), ...SURVEY_BOX_STYLE, zIndex: 760, bubble: false })
+  addLayer('temp', preview)
+  boxPointerGesture = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
+    start,
+    current: start,
+    preview,
+  }
   mapRef.value?.setPointerCapture?.(event.pointerId)
 }
 
+function startBoxMoveGesture(event: PointerEvent, hit: { box: SurveyBox; overlay: any }) {
+  const start = clientToLngLat(event.clientX, event.clientY)
+  if (!start) return
+  stopLinePointerEvent(event)
+  map?.setStatus?.({ dragEnable: false })
+  menuWindow?.close()
+  selectedBoxId = hit.box.id
+  syncBoxSelection()
+  boxMoveGesture = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
+    start,
+    current: start,
+    box: hit.box,
+    overlay: hit.overlay,
+  }
+  mapRef.value?.setPointerCapture?.(event.pointerId)
+}
+
+function movedBoxBounds(gesture: NonNullable<typeof boxMoveGesture>) {
+  const deltaLng = gesture.current[0] - gesture.start[0]
+  const deltaLat = gesture.current[1] - gesture.start[1]
+  return {
+    west: gesture.box.west + deltaLng,
+    south: gesture.box.south + deltaLat,
+    east: gesture.box.east + deltaLng,
+    north: gesture.box.north + deltaLat,
+  }
+}
+
+function onMapPointerDownCapture(event: PointerEvent) {
+  if (event.button !== 0) return
+  const target = event.target as HTMLElement
+  // 信息窗及其按钮必须优先响应，不能被框拖动或管线命中逻辑截获。
+  if (target.closest('.survey-line-menu, .amap-info-window, .amap-info-contentContainer, .survey-editor-panel')) return
+  if (props.mode === 'box') {
+    startBoxPointerGesture(event)
+    return
+  }
+  if (props.mode !== 'edit') return
+  // 点位和引入口优先处理自身点击，编辑面板/弹窗也不能被线命中逻辑截获。
+  if (target.closest('.survey-point-marker, .survey-inlet-marker, .joint-marker, .regulator-marker, .survey-line-arrow')) return
+  const boxBorderHit = findBoxAtClientPoint(event.clientX, event.clientY, true)
+  if (boxBorderHit) {
+    startBoxMoveGesture(event, boxBorderHit)
+    return
+  }
+  const hit = findLineAtClientPoint(event.clientX, event.clientY)
+  if (hit) {
+    stopLinePointerEvent(event)
+    map?.setStatus?.({ dragEnable: false })
+    linePointerGesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, hit }
+    mapRef.value?.setPointerCapture?.(event.pointerId)
+    return
+  }
+  const boxHit = findBoxAtClientPoint(event.clientX, event.clientY)
+  if (boxHit) startBoxMoveGesture(event, boxHit)
+}
+
 function onMapPointerMoveCapture(event: PointerEvent) {
+  if (boxPointerGesture && event.pointerId === boxPointerGesture.pointerId) {
+    stopLinePointerEvent(event)
+    const end = clientToLngLat(event.clientX, event.clientY)
+    if (end) {
+      boxPointerGesture.currentX = event.clientX
+      boxPointerGesture.currentY = event.clientY
+      boxPointerGesture.current = end
+      boxPointerGesture.preview.setBounds(boxBounds(normalizedBox(boxPointerGesture.start, end)))
+    }
+    return
+  }
+  if (boxMoveGesture && event.pointerId === boxMoveGesture.pointerId) {
+    stopLinePointerEvent(event)
+    const current = clientToLngLat(event.clientX, event.clientY)
+    if (current) {
+      boxMoveGesture.currentX = event.clientX
+      boxMoveGesture.currentY = event.clientY
+      boxMoveGesture.current = current
+      boxMoveGesture.overlay.setBounds(boxBounds(movedBoxBounds(boxMoveGesture)))
+    }
+    return
+  }
   if (!linePointerGesture || event.pointerId !== linePointerGesture.pointerId) return
   stopLinePointerEvent(event)
+}
+
+function finishBoxPointer(event: PointerEvent, save: boolean) {
+  const gesture = boxPointerGesture
+  if (!gesture || event.pointerId !== gesture.pointerId) return false
+  stopLinePointerEvent(event)
+  mapRef.value?.releasePointerCapture?.(event.pointerId)
+  boxPointerGesture = null
+  restoreMapDrag()
+  suppressLineClickUntil = performance.now() + 500
+  const moved = Math.hypot(gesture.currentX - gesture.startX, gesture.currentY - gesture.startY)
+  const end = gesture.current
+  if (save && moved > 6) {
+    const bounds = normalizedBox(gesture.start, end)
+    gesture.preview.setBounds(boxBounds(bounds))
+    // 先把预览框提升为正式图层，避免等待 Vue 更新期间短暂消失。
+    layers.temp = layers.temp.filter((overlay) => overlay !== gesture.preview)
+    layers.box.push(gesture.preview)
+    emit('create-box', bounds)
+  } else {
+    clearLayer('temp')
+  }
+  return true
+}
+
+function finishBoxMove(event: PointerEvent, save: boolean, openMenu = true) {
+  const gesture = boxMoveGesture
+  if (!gesture || event.pointerId !== gesture.pointerId) return false
+  stopLinePointerEvent(event)
+  mapRef.value?.releasePointerCapture?.(event.pointerId)
+  boxMoveGesture = null
+  restoreMapDrag()
+  suppressLineClickUntil = performance.now() + 500
+  const moved = Math.hypot(gesture.currentX - gesture.startX, gesture.currentY - gesture.startY)
+  if (save && moved > 6) {
+    emit('update-box', { id: gesture.box.id, bounds: movedBoxBounds(gesture) })
+    menuWindow?.close()
+  } else {
+    gesture.overlay.setBounds(boxBounds(gesture.box))
+    if (save && openMenu) openBoxMenu(gesture.box)
+  }
+  return true
 }
 
 function finishLinePointer(event: PointerEvent, openMenu: boolean) {
@@ -452,14 +767,21 @@ function finishLinePointer(event: PointerEvent, openMenu: boolean) {
 }
 
 function onMapPointerUpCapture(event: PointerEvent) {
+  if (finishBoxPointer(event, true)) return
+  if (finishBoxMove(event, true)) return
   finishLinePointer(event, true)
 }
 
 function onMapPointerCancelCapture(event: PointerEvent) {
+  if (finishBoxPointer(event, true)) return
+  if (finishBoxMove(event, true, false)) return
   finishLinePointer(event, false)
 }
 
 function onMapClickCapture(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  // 点击抑制只针对地图画布，不能拦截刚弹出的删除菜单。
+  if (target.closest('.survey-line-menu, .amap-info-window, .amap-info-contentContainer')) return
   if (performance.now() >= suppressLineClickUntil) return
   event.preventDefault()
   event.stopPropagation()
@@ -480,7 +802,7 @@ function renderSurveyLines() {
     // AMap Canvas 对 3px 细线的命中范围较小，增加透明宽热区提升点击可用性。
     const hitArea = new AMapApi.Polyline({
       path: [from, to],
-      strokeColor: '#7c3aed',
+      strokeColor: '#7a3e2e',
       strokeWeight: 16,
       strokeOpacity: 0.01,
       zIndex: 510,
@@ -500,6 +822,54 @@ function renderSurveyLines() {
   })
   toggleLayer('line', props.surveyLinesVisible)
   toggleLayer('arrow', props.surveyLinesVisible)
+}
+
+function boxBounds(box: Pick<SurveyBox, 'west' | 'south' | 'east' | 'north'>) {
+  return new AMapApi.Bounds([box.west, box.south], [box.east, box.north])
+}
+
+function openBoxMenu(box: SurveyBox) {
+  if (props.mode !== 'edit') return
+  selectedBoxId = box.id
+  syncBoxSelection()
+  const enableSequence = ++boxDeleteEnableSequence
+  const center: [number, number] = [(box.west + box.east) / 2, (box.south + box.north) / 2]
+  menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">差异标识 ${e(box.id)}</div><button class="survey-line-menu-btn danger" data-box-action="remove" data-box-id="${e(box.id)}" disabled title="请稍候 500ms，防止误删"><span class="icon">🗑</span>删除标识框</button></div>`)
+  menuWindow.open(map, center)
+  window.setTimeout(() => {
+    if (enableSequence !== boxDeleteEnableSequence || selectedBoxId !== box.id) return
+    const button = document.querySelector<HTMLButtonElement>(`.survey-line-menu-btn[data-box-id="${box.id}"]`)
+    if (button) {
+      button.disabled = false
+      button.title = '删除标识框'
+    }
+  }, 500)
+}
+
+function syncBoxSelection() {
+  boxOverlayMap.forEach((rectangle, id) => {
+    rectangle.setOptions(id === selectedBoxId ? SURVEY_BOX_SELECTED_STYLE : SURVEY_BOX_STYLE)
+  })
+}
+
+function clearBoxSelection() {
+  selectedBoxId = null
+  syncBoxSelection()
+}
+
+function renderSurveyBoxes() {
+  if (!map) return
+  clearLayer('box')
+  boxOverlayMap.clear()
+  props.surveyBoxes.forEach((box) => {
+    const rectangle = new AMapApi.Rectangle({ bounds: boxBounds(box), ...SURVEY_BOX_STYLE, bubble: false, cursor: props.mode === 'edit' ? 'move' : 'default' })
+    rectangle.on('click', () => openBoxMenu(box))
+    bindTip(rectangle, `<b>差异标识 ${e(box.id)}</b>`)
+    addLayer('box', rectangle)
+    boxOverlayMap.set(box.id, rectangle)
+  })
+  if (selectedBoxId && !props.surveyBoxes.some((box) => box.id === selectedBoxId)) selectedBoxId = null
+  syncBoxSelection()
 }
 
 function setPending(id: SurveyEndpointId, position: [number, number]) {
@@ -528,7 +898,7 @@ function handleConnectMapClick(position: [number, number]) {
 
 function showAddMenu(position: [number, number]) {
   const [lng, lat] = position
-  menuWindow.setContent(`<div class="survey-add-menu"><div class="survey-add-menu-title">选择点位类型</div><button class="survey-add-menu-btn" data-type="tee" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-tee"></span>三通</button><button class="survey-add-menu-btn" data-type="elbow" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-elbow"></span>弯头</button><button class="survey-add-menu-btn" data-type="straight" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-straight"></span>普通</button></div>`)
+  menuWindow.setContent(`<div class="survey-add-menu"><div class="survey-add-menu-title">选择点位类型</div><button class="survey-add-menu-btn" data-type="tee" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-tee"></span>三通</button><button class="survey-add-menu-btn" data-type="elbow" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-elbow"></span>弯头</button><button class="survey-add-menu-btn" data-type="straight" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-straight"></span>普通</button><button class="survey-add-menu-btn" data-type="joint" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-joint"></span>绝缘接头</button><button class="survey-add-menu-btn" data-type="inlet" data-lat="${lat}" data-lng="${lng}"><span class="survey-add-menu-icon type-inlet"></span>引入口</button></div>`)
   menuWindow.open(map, position)
 }
 
@@ -541,7 +911,9 @@ function handleMapClick(event: any) {
   if (props.mode === 'add-point') showAddMenu(position)
   else if (props.mode === 'connect') handleConnectMapClick(position)
   else {
+    if (props.mode === 'view') clearPinnedSurveyPointTip()
     menuWindow?.close()
+    clearBoxSelection()
     clearFacilitySelection()
     selectedUnitId = null
     syncUnitSelection()
@@ -570,21 +942,33 @@ function onDocumentClick(event: MouseEvent) {
   if (lineButton?.dataset.lineAction === 'remove' && lineButton.dataset.lineId) {
     emit('remove-line', lineButton.dataset.lineId)
     menuWindow?.close()
+    return
+  }
+  const boxButton = target.closest('.survey-line-menu-btn') as HTMLElement | null
+  if (boxButton?.dataset.boxAction === 'remove' && boxButton.dataset.boxId) {
+    boxDeleteEnableSequence++
+    selectedBoxId = null
+    syncBoxSelection()
+    menuWindow?.close()
+    emit('remove-box', boxButton.dataset.boxId)
   }
 }
 
 function fitToAll() {
   if (!map) return
-  const candidates = [...layers.unit, ...layers.pipe, ...layers.point, ...layers.line]
+  const candidates = [...layers.unit, ...layers.pipe, ...layers.point, ...layers.line, ...layers.box]
   if (!candidates.length) return
   map.setFitView(candidates, false, [60, 60, 60, 60], 20)
   window.setTimeout(() => { if (map && map.getZoom() < 18) map.setZoom(18) }, 300)
 }
 
 function markFocusedPoint(id: string | null) {
+  focusedPointId = id
   pointMarkerMap.forEach((marker, pointId) => {
     const element = (marker as any).__content as HTMLElement | undefined
-    element?.classList.toggle('is-focused', pointId === id)
+    const focused = pointId === id
+    element?.classList.toggle('is-focused', focused)
+    marker.setzIndex?.(focused ? 1200 : ((marker as any).__baseZIndex ?? 650))
   })
 }
 
@@ -596,26 +980,92 @@ function focusPoint(id: string) {
   map.setZoomAndCenter(20, [point.lng, point.lat], false, 500)
 }
 
-defineExpose({ focusPoint })
+function showPointInfo(id: string) {
+  const point = props.surveyPoints.find((item) => item.id === id)
+  if (!map || !point) return
+  focusPoint(id)
+  menuWindow?.close()
+  void showSurveyPointTip(point, [point.lng, point.lat], true)
+}
+
+defineExpose({ focusPoint, showPointInfo, clearPointInfo: clearPinnedSurveyPointTip })
 
 const editingPoint = computed(() => props.editingPointId ? props.surveyPoints.find((point) => point.id === props.editingPointId) ?? null : null)
 const editForm = reactive<{ type: SurveyPointType; rotation: number; depth: number | null; current: number | null; note: string }>({ type: 'straight', rotation: 0, depth: null, current: null, note: '' })
 const photoInputRef = ref<HTMLInputElement | null>(null)
-const selectedPhotoNames = ref<string[]>([])
+const pointPhotos = ref<Array<SurveyPhotoRecord & { url: string }>>([])
+const photosLoading = ref(false)
+const photosSaving = ref(false)
+let photoLoadSequence = 0
+
+function photoOwnerKey(point: SurveyPoint): string {
+  return `${point.id}:${point.createdAt}`
+}
+
+function releasePhotoUrls() {
+  pointPhotos.value.forEach((photo) => URL.revokeObjectURL(photo.url))
+  pointPhotos.value = []
+}
+
+async function loadPointPhotos(point: SurveyPoint | null) {
+  const sequence = ++photoLoadSequence
+  releasePhotoUrls()
+  if (!point) return
+  photosLoading.value = true
+  try {
+    const records = await listSurveyPhotos(photoOwnerKey(point))
+    if (sequence !== photoLoadSequence || editingPoint.value?.id !== point.id) return
+    pointPhotos.value = records.map((record) => ({
+      ...record,
+      url: URL.createObjectURL(record.blob),
+    }))
+  } catch (error) {
+    if (sequence === photoLoadSequence) {
+      ElMessage.error(`照片读取失败：${error instanceof Error ? error.message : '未知错误'}`)
+    }
+  } finally {
+    if (sequence === photoLoadSequence) photosLoading.value = false
+  }
+}
 
 function choosePhotos() {
   photoInputRef.value?.click()
 }
 
-function onPhotosSelected(event: Event) {
+async function onPhotosSelected(event: Event) {
   const input = event.target as HTMLInputElement
-  selectedPhotoNames.value = Array.from(input.files ?? []).map((file) => file.name)
+  const point = editingPoint.value
+  const files = Array.from(input.files ?? []).filter((file) => file.type.startsWith('image/'))
+  input.value = ''
+  if (!point || files.length === 0 || photosSaving.value) return
+  photosSaving.value = true
+  try {
+    await addSurveyPhotos(photoOwnerKey(point), point.id, files)
+    await loadPointPhotos(point)
+    ElMessage.success(`已保存 ${files.length} 张照片`)
+  } catch (error) {
+    ElMessage.error(`照片保存失败：${error instanceof Error ? error.message : '未知错误'}`)
+  } finally {
+    photosSaving.value = false
+  }
+}
+
+async function removePhoto(photo: SurveyPhotoRecord) {
+  const point = editingPoint.value
+  if (!point || !confirm(`确认删除照片“${photo.name}”？`)) return
+  try {
+    await deleteSurveyPhoto(photo.id)
+    await loadPointPhotos(point)
+    ElMessage.success('照片已删除')
+  } catch (error) {
+    ElMessage.error(`照片删除失败：${error instanceof Error ? error.message : '未知错误'}`)
+  }
 }
 
 watch(() => props.editingPointId, (id) => {
   markFocusedPoint(id)
-  selectedPhotoNames.value = []
   const point = id ? props.surveyPoints.find((item) => item.id === id) : null
+  void loadPointPhotos(point ?? null)
   if (!point) return
   editForm.type = point.type
   editForm.rotation = point.rotation
@@ -623,27 +1073,46 @@ watch(() => props.editingPointId, (id) => {
   editForm.current = point.current ?? null
   editForm.note = point.note ?? ''
 })
-watch(() => editForm.type, (type) => { if (type === 'straight') editForm.rotation = 0 })
-watch(() => editForm.rotation, (rotation) => {
+watch(() => editForm.type, (type) => { if (type !== 'tee' && type !== 'elbow') editForm.rotation = 0 })
+watch([() => editForm.type, () => editForm.rotation], ([type, rotation]) => {
   const point = editingPoint.value
   const item = point ? pointMarkerMap.get(point.id) : null
   const element = item ? (item as any).__content as HTMLElement : null
-  if (point && element) element.innerHTML = pointIconHtml({ ...point, rotation })
+  if (point && element) element.innerHTML = pointIconHtml({ ...point, type, rotation })
 })
 
 function saveEdit() {
   if (!props.editingPointId) return
-  emit('update-point', { id: props.editingPointId, patch: { type: editForm.type, rotation: editForm.type === 'straight' ? 0 : editForm.rotation, depth: editForm.depth ?? undefined, current: editForm.current ?? undefined, note: editForm.note || undefined } })
+  emit('update-point', { id: props.editingPointId, patch: { type: editForm.type, rotation: editForm.type === 'tee' || editForm.type === 'elbow' ? editForm.rotation : 0, depth: editForm.depth ?? undefined, current: editForm.current ?? undefined, note: editForm.note || undefined } })
   emit('close-editor')
 }
-function deleteEdit() {
+async function deleteEdit() {
   if (!props.editingPointId || !confirm(`确认删除 ${props.editingPointId} ?`)) return
+  const point = editingPoint.value
+  if (point) {
+    try {
+      await deleteSurveyPhotos(photoOwnerKey(point))
+    } catch (error) {
+      console.warn('[Survey] 删除点位照片失败：', error)
+    }
+  }
   emit('delete-point', props.editingPointId)
   emit('close-editor')
 }
-function closeEdit() { emit('close-editor') }
+function closeEdit() {
+  const point = editingPoint.value
+  const marker = point ? pointMarkerMap.get(point.id) : null
+  const element = marker ? (marker as any).__content as HTMLElement : null
+  if (point && element) element.innerHTML = pointIconHtml(point)
+  emit('close-editor')
+}
 
-const mapContainerClass = computed(() => props.mode === 'add-point' ? 'mode-add-point' : props.mode === 'connect' ? 'mode-connect' : '')
+const mapContainerClass = computed(() => ({
+  'mode-add-point': props.mode === 'add-point',
+  'mode-connect': props.mode === 'connect',
+  'mode-edit': props.mode === 'edit',
+  'mode-box': props.mode === 'box',
+}))
 
 onMounted(async () => {
   if (!mapRef.value) return
@@ -668,6 +1137,7 @@ onMounted(async () => {
     renderInlets()
     renderSurveyPoints()
     renderSurveyLines()
+    renderSurveyBoxes()
     fitToAll()
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '高德勘测地图加载失败'
@@ -682,6 +1152,7 @@ watch(() => props.regulators, renderRegulators, { deep: false })
 watch(() => props.inlets, renderInlets, { deep: false })
 watch(() => props.surveyPoints, () => { renderSurveyPoints(); renderSurveyLines() }, { deep: false })
 watch(() => props.surveyLines, renderSurveyLines, { deep: false })
+watch(() => props.surveyBoxes, renderSurveyBoxes, { deep: false })
 watch(() => props.visible, (value) => toggleLayer('pipe', value))
 watch(() => props.inletsVisible, (value) => toggleLayer('inlet', value))
 watch(() => props.unitsVisible, (value) => toggleLayer('unit', value))
@@ -689,9 +1160,21 @@ watch(() => props.jointsVisible, (value) => toggleLayer('joint', value))
 watch(() => props.regulatorsVisible, (value) => toggleLayer('regulator', value))
 watch(() => props.surveyPointsVisible, (value) => toggleLayer('point', value))
 watch(() => props.surveyLinesVisible, (value) => { toggleLayer('line', value); toggleLayer('arrow', value) })
-watch(() => props.mode, (mode) => { menuWindow?.close(); if (mode !== 'connect') clearPending() })
+watch(() => props.mode, (mode) => {
+  menuWindow?.close()
+  clearPinnedSurveyPointTip()
+  clearBoxSelection()
+  clearLayer('temp')
+  if (mode !== 'connect') clearPending()
+  renderSurveyPoints()
+  renderSurveyBoxes()
+})
 
 onBeforeUnmount(() => {
+  photoLoadSequence++
+  releasePhotoUrls()
+  hoverPhotoLoadSequence++
+  releaseHoverPhotoUrls()
   clearFacilitySelection()
   selectedUnitId = null
   syncUnitSelection()
@@ -730,9 +1213,11 @@ onBeforeUnmount(() => {
               <el-radio-button value="tee">三通</el-radio-button>
               <el-radio-button value="elbow">弯头</el-radio-button>
               <el-radio-button value="straight">普通</el-radio-button>
+              <el-radio-button value="joint">绝缘接头</el-radio-button>
+              <el-radio-button value="inlet">引入口</el-radio-button>
             </el-radio-group>
           </div>
-          <div v-if="editForm.type !== 'straight'" class="survey-editor-row">
+          <div v-if="editForm.type === 'tee' || editForm.type === 'elbow'" class="survey-editor-row">
             <label class="survey-editor-label">旋转角度</label>
             <div class="survey-rotation-row">
               <el-slider v-model="editForm.rotation" :min="0" :max="359" :step="1" :show-input="true" :show-input-controls="false" input-size="small" style="flex:1" />
@@ -748,11 +1233,20 @@ onBeforeUnmount(() => {
           <div class="survey-editor-row survey-photo-entry">
             <label class="survey-editor-label">照片留痕</label>
             <input ref="photoInputRef" class="survey-photo-input" type="file" accept="image/*" multiple @change="onPhotosSelected" />
-            <button type="button" class="survey-photo-add-btn" @click="choosePhotos">＋ 添加照片</button>
-            <div v-if="selectedPhotoNames.length" class="survey-photo-selection">
-              已选择 {{ selectedPhotoNames.length }} 张：{{ selectedPhotoNames.join('、') }}
+            <button type="button" class="survey-photo-add-btn" :disabled="photosSaving" @click="choosePhotos">
+              {{ photosSaving ? '正在保存…' : '＋ 添加照片' }}
+            </button>
+            <div v-if="photosLoading" class="survey-photo-hint">正在读取照片…</div>
+            <div v-else-if="pointPhotos.length" class="survey-photo-grid">
+              <div v-for="photo in pointPhotos" :key="photo.id" class="survey-photo-item">
+                <a :href="photo.url" target="_blank" rel="noopener noreferrer" class="survey-photo-preview" :title="`查看 ${photo.name}`">
+                  <img :src="photo.url" :alt="photo.name" />
+                </a>
+                <button type="button" class="survey-photo-remove" :title="`删除 ${photo.name}`" @click="removePhoto(photo)">×</button>
+                <div class="survey-photo-name" :title="photo.name">{{ photo.name }}</div>
+              </div>
             </div>
-            <div v-else class="survey-photo-hint">支持选择多张现场照片，上传与持久化将在后续接入</div>
+            <div v-else class="survey-photo-hint">支持多张现场照片，添加后自动保存到当前浏览器</div>
           </div>
           <div class="survey-editor-row"><label class="survey-editor-label">备注</label><el-input v-model="editForm.note" type="textarea" :rows="2" size="small" /></div>
           <div class="survey-editor-coords">经度 {{ editingPoint.lng.toFixed(6) }}<br>纬度 {{ editingPoint.lat.toFixed(6) }}</div>
