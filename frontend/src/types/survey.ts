@@ -41,7 +41,7 @@ export interface SurveyPoint {
   rotation: number
   /** 埋深(米) */
   depth?: number
-  /** 电流 */
+  /** 电流（mA） */
   current?: number
   /** 备注 */
   note?: string
@@ -66,6 +66,8 @@ export interface SurveyBox {
   south: number
   east: number
   north: number
+  /** 用于说明勘测管线与官方管线差异等信息。 */
+  note?: string
   createdAt: string
 }
 

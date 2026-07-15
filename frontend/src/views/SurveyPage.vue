@@ -7,7 +7,7 @@
  *  - view 模式,点击点位 marker 打开编辑浮层(类型/角度/埋深/电流/备注/删除)
  *  - 撤销/重做已就绪
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCpStore } from '@/stores/cp'
 import { useSurveyStore } from '@/stores/survey'
@@ -88,8 +88,16 @@ function onCreatePoint(payload: { lat: number; lng: number; type: SurveyPointTyp
   // 创建后保持在 add-point 模式,方便连续加点
 }
 
-function onPointClick(id: string) {
+async function revealPointInList(id: string) {
+  if (!communityExpanded.value) communityExpanded.value = true
+  await nextTick()
+  const row = document.querySelector<HTMLElement>(`.survey-point-row[data-point-id="${id}"]`)
+  row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function onPointClick(id: string, revealInList = true) {
   selectedPointId.value = id
+  if (revealInList) void revealPointInList(id)
   if (mode.value === 'view') {
     editingPointId.value = null
     mapRef.value?.showPointInfo(id)
@@ -101,7 +109,12 @@ function onPointClick(id: string) {
 }
 
 function onListPointClick(id: string) {
-  onPointClick(id)
+  onPointClick(id, false)
+}
+
+function onClearPointSelection() {
+  selectedPointId.value = null
+  editingPointId.value = null
 }
 
 function pointTypeLabel(type: SurveyPointType) {
@@ -147,6 +160,10 @@ function onRemoveBox(id: string) {
 
 function onUpdateBox(payload: { id: string; bounds: Omit<SurveyBox, 'id' | 'createdAt'> }) {
   survey.updateBox(payload.id, payload.bounds)
+}
+
+function onUpdateBoxNote(payload: { id: string; note: string }) {
+  survey.updateBox(payload.id, { note: payload.note })
 }
 
 // ========== 图例显隐 ==========
@@ -245,7 +262,7 @@ onMounted(async () => {
           勘测点位（{{ survey.points.length }}）
         </div>
         <div v-if="survey.points.length === 0" class="empty-tip">
-          <div v-if="store.loading || !survey.points.length">正在加载 CSV...</div>
+          <div v-if="store.loading || !survey.points.length">加载数据中……</div>
           <div v-else>暂无点位</div>
         </div>
         <div
@@ -256,10 +273,12 @@ onMounted(async () => {
           :data-point-id="p.id"
           @click="onListPointClick(p.id)"
         >
-          <span
-            class="survey-point-type-dot"
-            :class="[`type-${p.type}`, `source-${p.source || 'csv'}`]"
-          ></span>
+          <span class="survey-point-type-icon">
+            <span
+              class="survey-point-type-dot"
+              :class="[`type-${p.type}`, `source-${p.source || 'csv'}`]"
+            ></span>
+          </span>
           <span class="survey-point-id">{{ p.id }}</span>
           <span class="survey-point-type">
             {{ pointTypeLabel(p.type) }}
@@ -292,6 +311,7 @@ onMounted(async () => {
         :editing-point-id="editingPointId"
         @create-point="onCreatePoint"
         @point-click="onPointClick"
+        @clear-point-selection="onClearPointSelection"
         @update-point="onUpdatePoint"
         @delete-point="onDeletePoint"
         @close-editor="onCloseEditor"
@@ -299,6 +319,7 @@ onMounted(async () => {
         @remove-line="onRemoveLine"
         @create-box="onCreateBox"
         @update-box="onUpdateBox"
+        @update-box-note="onUpdateBoxNote"
         @remove-box="onRemoveBox"
       />
 

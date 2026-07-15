@@ -355,11 +355,11 @@ export const useSurveyStore = defineStore('survey', () => {
     pushHistory()
   }
 
-  function updateBox(id: string, bounds: Omit<SurveyBox, 'id' | 'createdAt'>) {
+  function updateBox(id: string, patch: Partial<Omit<SurveyBox, 'id' | 'createdAt'>>) {
     const index = boxes.value.findIndex((box) => box.id === id)
     if (index < 0) return
     const next = [...boxes.value]
-    next[index] = { ...next[index], ...bounds }
+    next[index] = { ...next[index], ...patch }
     boxes.value = next
     pushHistory()
   }

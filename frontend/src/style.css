@@ -297,7 +297,7 @@ html, body, #app {
   cursor: pointer;
   transition: all 0.15s;
 }
-.survey-tool-btn:hover:not(:disabled) {
+.survey-tool-btn:hover:not(:disabled):not(.active) {
   border-color: #409eff;
   color: #409eff;
 }
@@ -339,6 +339,14 @@ html, body, #app {
 .survey-point-row.active {
   background: #ecf5ff;
 }
+.survey-point-type-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+}
 .survey-point-type-dot {
   width: 10px;
   height: 10px;
@@ -346,12 +354,15 @@ html, body, #app {
   flex-shrink: 0;
 }
 .survey-point-type-dot.type-tee {
-  background: #303133;  /* T 形黑色 */
+  width: 16px;
+  height: 16px;
+  background: center / 16px 16px no-repeat url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1V15M8 8H15' fill='none' stroke='%233f4650' stroke-width='2' stroke-linecap='butt' stroke-linejoin='miter'/></svg>");
   border-radius: 0;
-  transform: rotate(45deg);
 }
 .survey-point-type-dot.type-elbow {
-  background: #303133;
+  width: 16px;
+  height: 16px;
+  background: center / 16px 16px no-repeat url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1V8H15' fill='none' stroke='%233f4650' stroke-width='2' stroke-linecap='butt' stroke-linejoin='miter'/></svg>");
   border-radius: 0;
 }
 .survey-point-type-dot.type-straight {
@@ -668,12 +679,50 @@ html, body, #app {
   padding: 6px;
   background: #fff;
 }
+.survey-box-menu {
+  padding-right: 16px;
+  padding-bottom: 1px;
+}
+.survey-box-menu .survey-line-menu-btn {
+  position: relative;
+  isolation: isolate;
+  font-size: 13px;
+}
+.survey-box-menu .survey-line-menu-btn::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: -16px;
+  bottom: 0;
+  left: 0;
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.survey-box-menu .survey-line-menu-btn:hover {
+  background: transparent;
+}
+.survey-box-menu .survey-line-menu-btn:hover::before {
+  background: #fef0f0;
+}
+.survey-box-menu .survey-line-menu-btn .icon,
+.survey-box-menu .survey-line-menu-btn .label {
+  position: relative;
+  z-index: 1;
+}
+.survey-box-menu .survey-line-menu-btn.danger .icon {
+  font-size: 16px;
+  transform: translateY(1px);
+}
 .survey-line-menu-title {
   font-size: 13px;
   font-weight: 600;
   color: #303133;
-  padding: 4px 8px 2px;
-  font-family: 'Consolas', 'Monaco', monospace;
+  padding: 0 8px 4px;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  line-height: 20px;
+  transform: translateY(-3px);
 }
 .survey-line-menu-meta {
   font-size: 11px;
@@ -714,7 +763,14 @@ html, body, #app {
   cursor: not-allowed;
 }
 .survey-line-menu-btn .icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
   font-size: 13px;
+  line-height: 1;
 }
 
 /* 勘测编辑卡片使用独立过渡，避免与主地图信息卡片的 slide-right 样式互相覆盖。 */
@@ -891,6 +947,54 @@ html, body, #app {
   line-height: 1.6;
   pointer-events: none;
 }
+.amap-business-tip:has(.survey-point-id-tip) {
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.survey-point-id-tip {
+  color: #303133;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.survey-box-tip-note {
+  display: inline-block;
+  max-width: 240px;
+  margin-top: 3px;
+  color: #606266;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.amap-business-tip:has(.survey-box-tip) {
+  position: relative;
+  transform: translateY(-10px);
+}
+.amap-business-tip:has(.survey-box-tip)::before,
+.amap-business-tip:has(.survey-box-tip)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.amap-business-tip:has(.survey-box-tip)::before {
+  bottom: -9px;
+  border-top: 9px solid #dcdfe6;
+  border-right: 8px solid transparent;
+  border-left: 8px solid transparent;
+}
+.amap-business-tip:has(.survey-box-tip)::after {
+  bottom: -7px;
+  border-top: 8px solid rgba(255, 255, 255, 0.96);
+  border-right: 7px solid transparent;
+  border-left: 7px solid transparent;
+}
 
 .survey-photo-input {
   display: none;
@@ -1000,6 +1104,9 @@ html, body, #app {
   border: 0;
   border-radius: 10px;
 }
+.amap-business-tip:has(.survey-point-hover-card.is-pinned) {
+  overflow: visible;
+}
 .survey-point-hover-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 140px;
@@ -1042,12 +1149,22 @@ html, body, #app {
   font-weight: 700;
 }
 .survey-point-hover-note {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid #ebeef5;
-  color: #606266;
   font-size: 13px;
   line-height: 1.45;
+}
+.survey-point-hover-note span {
+  color: #909399;
+}
+.survey-point-hover-note strong {
+  color: #606266;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .survey-point-hover-photo {
   display: flex;
@@ -1100,23 +1217,95 @@ html, body, #app {
   grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
 }
 
-.survey-point-hover-photo-grid.photo-count-3 img:first-child {
+.survey-point-hover-photo-grid.photo-count-3 .survey-point-hover-image:first-child {
   grid-column: 1 / -1;
 }
 
-.survey-point-hover-photo-grid img {
+.survey-point-hover-image {
+  position: relative;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
+  padding: 0;
   display: block;
-  object-fit: cover;
+  overflow: hidden;
+  border: 0;
   background: #e4e7ed;
+  font: inherit;
+}
+
+.survey-point-hover-image img {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.survey-point-hover-thumb {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 1;
+  transition: opacity 0.12s ease;
+}
+
+.survey-point-hover-zoom {
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1);
+  transform-origin: center;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-photo.has-photos {
+  overflow: visible;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image {
+  overflow: visible;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image:hover {
+  z-index: 20;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image {
+  cursor: zoom-in;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-zoom {
+  z-index: 2;
+  transition: opacity 0.08s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image:not(.is-opened):hover .survey-point-hover-thumb {
+  opacity: 0;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image:not(.is-opened):hover .survey-point-hover-zoom {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(2.5);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32);
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image.is-opened .survey-point-hover-thumb {
+  opacity: 1;
+  transition: none;
+}
+.survey-point-hover-card.is-pinned .survey-point-hover-image.is-opened .survey-point-hover-zoom {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1);
+  box-shadow: none;
+  transition: none;
 }
 
 /* 纯悬停提示不得挡住 Marker/Polyline 的点击；带按钮的菜单不受此规则影响。 */
 .amap-info-contentContainer:has(.amap-business-tip),
 .amap-info-contentContainer:has(.amap-business-tip) * {
+  pointer-events: none !important;
+}
+.amap-info-contentContainer:has(.survey-point-hover-card.is-pinned),
+.amap-info-contentContainer:has(.survey-point-hover-card.is-pinned) * {
+  pointer-events: auto !important;
+}
+.amap-info-contentContainer:has(.survey-point-hover-card.is-pinned) .survey-point-hover-image img {
   pointer-events: none !important;
 }
 

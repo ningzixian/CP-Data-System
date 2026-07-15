@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { loadAMap } from '@/map/amap-loader'
 import { escapeHtml as e } from '@/utils/html'
 import {
@@ -37,6 +37,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'create-point', payload: { lat: number; lng: number; type: SurveyPointType }): void
   (e: 'point-click', id: string): void
+  (e: 'clear-point-selection'): void
   (e: 'update-point', payload: { id: string; patch: Partial<SurveyPoint> }): void
   (e: 'delete-point', id: string): void
   (e: 'close-editor'): void
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   (e: 'remove-line', id: string): void
   (e: 'create-box', bounds: Omit<SurveyBox, 'id' | 'createdAt'>): void
   (e: 'update-box', payload: { id: string; bounds: Omit<SurveyBox, 'id' | 'createdAt'> }): void
+  (e: 'update-box-note', payload: { id: string; note: string }): void
   (e: 'remove-box', id: string): void
 }>()
 
@@ -78,10 +80,12 @@ const FACILITY_FOCUS_ZOOM = 19
 
 const PIPE_STYLE = { strokeColor: '#67c23a', strokeWeight: 3, strokeOpacity: 0.75, lineCap: 'round', lineJoin: 'round', zIndex: 300 }
 const PIPE_ACTIVE_STYLE = { strokeColor: '#8B4513', strokeWeight: 6, strokeOpacity: 1, zIndex: 810 }
-const SURVEY_LINE_STYLE = { strokeColor: '#7a3e2e', strokeWeight: 4, strokeOpacity: 1, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
+const SURVEY_LINE_STYLE = { strokeColor: '#e6c800', strokeWeight: 4, strokeOpacity: 1, lineCap: 'round', lineJoin: 'round', zIndex: 500 }
 const TEMP_LINE_STYLE = { strokeColor: '#409eff', strokeWeight: 3, strokeOpacity: 0.85, strokeStyle: 'dashed', strokeDasharray: [4, 4], zIndex: 700 }
 const SURVEY_BOX_STYLE = { strokeColor: '#ff0000', strokeWeight: 2, strokeOpacity: 1, strokeStyle: 'dashed', strokeDasharray: [8, 6], fillColor: '#ff0000', fillOpacity: 0.05, zIndex: 490 }
 const SURVEY_BOX_SELECTED_STYLE = { ...SURVEY_BOX_STYLE, strokeWeight: 4, fillOpacity: 0.1, zIndex: 740 }
+const SURVEY_ARROW_SIZE_PX = 14
+const SURVEY_ARROW_MIN_LINE_LENGTH_PX = SURVEY_ARROW_SIZE_PX + 4
 
 function contentElement(className: string, html: string) {
   const element = document.createElement('div')
@@ -115,7 +119,7 @@ function pointIconHtml(point: SurveyPoint) {
   } else if (point.type === 'joint') {
     svg = '<line x1="7" y1="7" x2="21" y2="21" stroke="#f56c6c" stroke-width="4" stroke-linecap="round"/><line x1="21" y1="7" x2="7" y2="21" stroke="#f56c6c" stroke-width="4" stroke-linecap="round"/><circle cx="14" cy="14" r="3" fill="#fff" stroke="#f56c6c" stroke-width="2"/>'
   } else if (point.type === 'inlet') {
-    svg = '<path d="M14 3 L25 14 L14 25 L3 14 Z" fill="#909399" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="3" fill="#fff"/>'
+    svg = '<path d="M14 5 L23 14 L14 23 L5 14 Z" fill="#16a085" stroke="#fff" stroke-width="1.5"/>'
   } else {
     const fill = point.source === 'manual' ? '#409eff' : '#e6a23c'
     svg = `<circle cx="14" cy="14" r="5" fill="${fill}" stroke="#fff" stroke-width="2"/>`
@@ -125,7 +129,7 @@ function pointIconHtml(point: SurveyPoint) {
 }
 
 function arrowHtml(angle: number) {
-  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="14" height="14" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#7a3e2e" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
+  return `<div style="transform:rotate(${angle}deg);transform-origin:50% 50%"><svg width="${SURVEY_ARROW_SIZE_PX}" height="${SURVEY_ARROW_SIZE_PX}" viewBox="0 0 14 14" style="overflow:visible"><path d="M 7 0 L 14 14 L 0 14 z" fill="#e6c800" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></div>`
 }
 
 function addLayer(kind: LayerKey, overlay: any) {
@@ -166,9 +170,11 @@ function releaseHoverPhotoUrls() {
   hoverPhotoUrls = []
 }
 
-function surveyPointTipHtml(point: SurveyPoint, photoContent: string): string {
+function surveyPointTipHtml(point: SurveyPoint, photoContent: string, pinned = false): string {
   const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : point.type === 'joint' ? '绝缘接头' : point.type === 'inlet' ? '引入口' : '普通点位'
-  return `<div class="survey-point-hover-card"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? e(point.current) : '未记录'}</strong></div>${point.note ? `<div class="survey-point-hover-note">${e(point.note)}</div>` : ''}</div>${photoContent}</div>`
+  const note = point.note?.trim()
+  const noteHtml = note ? `<div class="survey-point-hover-note"><span>备注</span><strong>${e(note)}</strong></div>` : ''
+  return `<div class="survey-point-hover-card${pinned ? ' is-pinned' : ''}"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? `${e(point.current)} mA` : '未记录'}</strong></div>${noteHtml}</div>${photoContent}</div>`
 }
 
 function emptyHoverPhotoHtml(message: string): string {
@@ -179,24 +185,24 @@ async function showSurveyPointTip(point: SurveyPoint, position: [number, number]
   const sequence = ++hoverPhotoLoadSequence
   releaseHoverPhotoUrls()
   if (pinned) pinnedSurveyPointId = point.id
-  openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('正在读取照片…')))
+  openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('正在读取照片…'), pinned))
   try {
     const photos = await listSurveyPhotos(photoOwnerKey(point))
     if (sequence !== hoverPhotoLoadSequence) return
     if (photos.length === 0) {
-      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('暂无照片')))
+      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('暂无照片'), pinned))
       return
     }
     const previewPhotos = photos.slice(0, 4).map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       hoverPhotoUrls.push(url)
-      return `<img src="${e(url)}" alt="${e(photo.name)}" title="${e(photo.name)}">`
+      return `<button type="button" class="survey-point-hover-image" data-photo-url="${e(url)}"><img class="survey-point-hover-thumb" src="${e(url)}" alt="${e(photo.name)}"><img class="survey-point-hover-zoom" src="${e(url)}" alt="" aria-hidden="true"></button>`
     }).join('')
     const photoContent = `<div class="survey-point-hover-photo has-photos"><div class="survey-point-hover-photo-grid photo-count-${previewPhotos.length}">${previewPhotos}</div></div>`
-    openTip(position, surveyPointTipHtml(point, photoContent))
+    openTip(position, surveyPointTipHtml(point, photoContent, pinned))
   } catch (error) {
     if (sequence === hoverPhotoLoadSequence) {
-      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('照片读取失败')))
+      openTip(position, surveyPointTipHtml(point, emptyHoverPhotoHtml('照片读取失败'), pinned))
     }
     console.warn('[Survey] 点位照片读取失败：', error)
   }
@@ -209,12 +215,23 @@ function clearPinnedSurveyPointTip() {
   tipWindow?.close()
 }
 
+function clearSurveyPointSelection() {
+  clearPinnedSurveyPointTip()
+  markFocusedPoint(null)
+  emit('clear-point-selection')
+}
+
 function bindSurveyPointTip(overlay: any, point: SurveyPoint) {
   overlay.on('mouseover', (event: any) => {
-    if (props.mode !== 'view' || pinnedSurveyPointId) return
     const pos = event.lnglat ?? overlay.getPosition?.()
     if (!pos) return
-    void showSurveyPointTip(point, [pos.getLng(), pos.getLat()])
+    const position: [number, number] = [pos.getLng(), pos.getLat()]
+    if (props.mode === 'view') {
+      if (pinnedSurveyPointId) return
+      void showSurveyPointTip(point, position)
+    } else if (props.mode === 'edit' || props.mode === 'connect') {
+      openTip(position, `<div class="survey-point-id-tip">${e(point.id)}</div>`)
+    }
   })
   overlay.on('mouseout', () => {
     if (pinnedSurveyPointId) return
@@ -317,6 +334,7 @@ function bindSelectableFacility(kind: SelectableFacilityKind, overlay: any, html
   const select = () => {
     if (props.mode !== 'view') return
     preventImmediateMapClear()
+    clearSurveyPointSelection()
     if (selectedFacility?.overlay === overlay) {
       clearFacilitySelection()
       return
@@ -368,6 +386,7 @@ function renderUnits() {
     polygon.on('click', () => {
       if (props.mode !== 'view') return
       preventImmediateMapClear()
+      clearSurveyPointSelection()
       clearFacilitySelection()
       selectedUnitId = selectedUnitId === unit.id ? null : unit.id
       syncUnitSelection()
@@ -445,7 +464,8 @@ function renderSurveyPoints() {
   pointMarkerMap.clear()
   props.surveyPoints.forEach((point) => {
     const draggable = props.mode === 'edit'
-    const item = createMarker([point.lng, point.lat], `survey-point-marker source-${point.source || 'csv'}${draggable ? ' is-draggable' : ''}`, pointIconHtml(point), 650, true, draggable)
+    const baseZIndex = point.type === 'inlet' ? 640 : point.type === 'tee' || point.type === 'elbow' ? 660 : 650
+    const item = createMarker([point.lng, point.lat], `survey-point-marker source-${point.source || 'csv'}${draggable ? ' is-draggable' : ''}`, pointIconHtml(point), baseZIndex, true, draggable)
     ;((item as any).__content as HTMLElement).addEventListener('click', (event) => {
       event.stopPropagation()
       if (props.mode === 'add-point' || props.mode === 'box') return
@@ -517,6 +537,18 @@ let boxMoveGesture: {
   box: SurveyBox
   overlay: any
 } | null = null
+type BoxResizeHandle = 'north' | 'south' | 'west' | 'east' | 'north-west' | 'north-east' | 'south-west' | 'south-east'
+let boxResizeGesture: {
+  pointerId: number
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  current: [number, number]
+  box: SurveyBox
+  overlay: any
+  handle: BoxResizeHandle
+} | null = null
 let suppressLineClickUntil = 0
 
 function pointToSegmentDistance(
@@ -583,6 +615,53 @@ function findBoxAtClientPoint(clientX: number, clientY: number, borderOnly = fal
   return null
 }
 
+function findSelectedBoxResizeHandle(clientX: number, clientY: number): { box: SurveyBox; overlay: any; handle: BoxResizeHandle } | null {
+  if (!map || !mapRef.value || !selectedBoxId) return null
+  const box = props.surveyBoxes.find((item) => item.id === selectedBoxId)
+  const overlay = box ? boxOverlayMap.get(box.id) : null
+  if (!box || !overlay) return null
+  const rect = mapRef.value.getBoundingClientRect()
+  const x = clientX - rect.left
+  const y = clientY - rect.top
+  const cornerA = map.lngLatToContainer([box.west, box.south])
+  const cornerB = map.lngLatToContainer([box.east, box.north])
+  const left = Math.min(cornerA.getX(), cornerB.getX())
+  const right = Math.max(cornerA.getX(), cornerB.getX())
+  const top = Math.min(cornerA.getY(), cornerB.getY())
+  const bottom = Math.max(cornerA.getY(), cornerB.getY())
+  const tolerance = 10
+  if (x < left - tolerance || x > right + tolerance || y < top - tolerance || y > bottom + tolerance) return null
+  const nearWest = Math.abs(x - left) <= tolerance
+  const nearEast = Math.abs(x - right) <= tolerance
+  const nearNorth = Math.abs(y - top) <= tolerance
+  const nearSouth = Math.abs(y - bottom) <= tolerance
+  const handle: BoxResizeHandle | null = nearWest && nearNorth ? 'north-west'
+    : nearEast && nearNorth ? 'north-east'
+      : nearWest && nearSouth ? 'south-west'
+        : nearEast && nearSouth ? 'south-east'
+          : nearNorth ? 'north'
+            : nearSouth ? 'south'
+              : nearWest ? 'west'
+                : nearEast ? 'east'
+                  : null
+  return handle ? { box, overlay, handle } : null
+}
+
+function resizeCursor(handle: BoxResizeHandle): string {
+  if (handle === 'north' || handle === 'south') return 'ns-resize'
+  if (handle === 'west' || handle === 'east') return 'ew-resize'
+  if (handle === 'north-west' || handle === 'south-east') return 'nwse-resize'
+  return 'nesw-resize'
+}
+
+function setMapResizeCursor(cursor = '') {
+  if (mapRef.value) {
+    if (cursor) mapRef.value.style.setProperty('cursor', cursor, 'important')
+    else mapRef.value.style.removeProperty('cursor')
+  }
+  map?.setDefaultCursor?.(cursor || 'default')
+}
+
 function clientToLngLat(clientX: number, clientY: number): [number, number] | null {
   if (!map || !mapRef.value) return null
   const rect = mapRef.value.getBoundingClientRect()
@@ -629,6 +708,7 @@ function startBoxMoveGesture(event: PointerEvent, hit: { box: SurveyBox; overlay
   stopLinePointerEvent(event)
   map?.setStatus?.({ dragEnable: false })
   menuWindow?.close()
+  setMapResizeCursor('move')
   selectedBoxId = hit.box.id
   syncBoxSelection()
   boxMoveGesture = {
@@ -645,6 +725,27 @@ function startBoxMoveGesture(event: PointerEvent, hit: { box: SurveyBox; overlay
   mapRef.value?.setPointerCapture?.(event.pointerId)
 }
 
+function startBoxResizeGesture(event: PointerEvent, hit: { box: SurveyBox; overlay: any; handle: BoxResizeHandle }) {
+  const current = clientToLngLat(event.clientX, event.clientY)
+  if (!current) return
+  stopLinePointerEvent(event)
+  map?.setStatus?.({ dragEnable: false })
+  menuWindow?.close()
+  setMapResizeCursor(resizeCursor(hit.handle))
+  boxResizeGesture = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
+    current,
+    box: hit.box,
+    overlay: hit.overlay,
+    handle: hit.handle,
+  }
+  mapRef.value?.setPointerCapture?.(event.pointerId)
+}
+
 function movedBoxBounds(gesture: NonNullable<typeof boxMoveGesture>) {
   const deltaLng = gesture.current[0] - gesture.start[0]
   const deltaLat = gesture.current[1] - gesture.start[1]
@@ -653,6 +754,21 @@ function movedBoxBounds(gesture: NonNullable<typeof boxMoveGesture>) {
     south: gesture.box.south + deltaLat,
     east: gesture.box.east + deltaLng,
     north: gesture.box.north + deltaLat,
+  }
+}
+
+function resizedBoxBounds(gesture: NonNullable<typeof boxResizeGesture>) {
+  let { west, south, east, north } = gesture.box
+  const [lng, lat] = gesture.current
+  if (gesture.handle.includes('west')) west = lng
+  if (gesture.handle.includes('east')) east = lng
+  if (gesture.handle.includes('north')) north = lat
+  if (gesture.handle.includes('south')) south = lat
+  return {
+    west: Math.min(west, east),
+    south: Math.min(south, north),
+    east: Math.max(west, east),
+    north: Math.max(south, north),
   }
 }
 
@@ -668,6 +784,11 @@ function onMapPointerDownCapture(event: PointerEvent) {
   if (props.mode !== 'edit') return
   // 点位和引入口优先处理自身点击，编辑面板/弹窗也不能被线命中逻辑截获。
   if (target.closest('.survey-point-marker, .survey-inlet-marker, .joint-marker, .regulator-marker, .survey-line-arrow')) return
+  const resizeHit = findSelectedBoxResizeHandle(event.clientX, event.clientY)
+  if (resizeHit) {
+    startBoxResizeGesture(event, resizeHit)
+    return
+  }
   const boxBorderHit = findBoxAtClientPoint(event.clientX, event.clientY, true)
   if (boxBorderHit) {
     startBoxMoveGesture(event, boxBorderHit)
@@ -697,6 +818,17 @@ function onMapPointerMoveCapture(event: PointerEvent) {
     }
     return
   }
+  if (boxResizeGesture && event.pointerId === boxResizeGesture.pointerId) {
+    stopLinePointerEvent(event)
+    const current = clientToLngLat(event.clientX, event.clientY)
+    if (current) {
+      boxResizeGesture.currentX = event.clientX
+      boxResizeGesture.currentY = event.clientY
+      boxResizeGesture.current = current
+      boxResizeGesture.overlay.setBounds(boxBounds(resizedBoxBounds(boxResizeGesture)))
+    }
+    return
+  }
   if (boxMoveGesture && event.pointerId === boxMoveGesture.pointerId) {
     stopLinePointerEvent(event)
     const current = clientToLngLat(event.clientX, event.clientY)
@@ -707,6 +839,11 @@ function onMapPointerMoveCapture(event: PointerEvent) {
       boxMoveGesture.overlay.setBounds(boxBounds(movedBoxBounds(boxMoveGesture)))
     }
     return
+  }
+  if (!linePointerGesture && props.mode === 'edit') {
+    const resizeHit = findSelectedBoxResizeHandle(event.clientX, event.clientY)
+    const boxHit = resizeHit ? null : findBoxAtClientPoint(event.clientX, event.clientY)
+    setMapResizeCursor(resizeHit ? resizeCursor(resizeHit.handle) : boxHit ? 'move' : '')
   }
   if (!linePointerGesture || event.pointerId !== linePointerGesture.pointerId) return
   stopLinePointerEvent(event)
@@ -742,10 +879,31 @@ function finishBoxMove(event: PointerEvent, save: boolean, openMenu = true) {
   mapRef.value?.releasePointerCapture?.(event.pointerId)
   boxMoveGesture = null
   restoreMapDrag()
+  setMapResizeCursor()
   suppressLineClickUntil = performance.now() + 500
   const moved = Math.hypot(gesture.currentX - gesture.startX, gesture.currentY - gesture.startY)
   if (save && moved > 6) {
     emit('update-box', { id: gesture.box.id, bounds: movedBoxBounds(gesture) })
+    menuWindow?.close()
+  } else {
+    gesture.overlay.setBounds(boxBounds(gesture.box))
+    if (save && openMenu) openBoxMenu(gesture.box)
+  }
+  return true
+}
+
+function finishBoxResize(event: PointerEvent, save: boolean, openMenu = true) {
+  const gesture = boxResizeGesture
+  if (!gesture || event.pointerId !== gesture.pointerId) return false
+  stopLinePointerEvent(event)
+  mapRef.value?.releasePointerCapture?.(event.pointerId)
+  boxResizeGesture = null
+  restoreMapDrag()
+  setMapResizeCursor()
+  suppressLineClickUntil = performance.now() + 500
+  const moved = Math.hypot(gesture.currentX - gesture.startX, gesture.currentY - gesture.startY)
+  if (save && moved > 3) {
+    emit('update-box', { id: gesture.box.id, bounds: resizedBoxBounds(gesture) })
     menuWindow?.close()
   } else {
     gesture.overlay.setBounds(boxBounds(gesture.box))
@@ -768,12 +926,14 @@ function finishLinePointer(event: PointerEvent, openMenu: boolean) {
 
 function onMapPointerUpCapture(event: PointerEvent) {
   if (finishBoxPointer(event, true)) return
+  if (finishBoxResize(event, true)) return
   if (finishBoxMove(event, true)) return
   finishLinePointer(event, true)
 }
 
 function onMapPointerCancelCapture(event: PointerEvent) {
   if (finishBoxPointer(event, true)) return
+  if (finishBoxResize(event, true, false)) return
   if (finishBoxMove(event, true, false)) return
   finishLinePointer(event, false)
 }
@@ -802,7 +962,7 @@ function renderSurveyLines() {
     // AMap Canvas 对 3px 细线的命中范围较小，增加透明宽热区提升点击可用性。
     const hitArea = new AMapApi.Polyline({
       path: [from, to],
-      strokeColor: '#7a3e2e',
+      strokeColor: '#e6c800',
       strokeWeight: 16,
       strokeOpacity: 0.01,
       zIndex: 510,
@@ -811,9 +971,13 @@ function renderSurveyLines() {
     })
     bindTip(hitArea, `<b>${e(lineData.id)}</b><br>${e(lineData.fromId)} → ${e(lineData.toId)}`)
     addLayer('line', hitArea)
+    const fromPixel = map.lngLatToContainer(from)
+    const toPixel = map.lngLatToContainer(to)
+    const linePixelLength = Math.hypot(toPixel.getX() - fromPixel.getX(), toPixel.getY() - fromPixel.getY())
+    if (linePixelLength < SURVEY_ARROW_MIN_LINE_LENGTH_PX) return
     const mid: [number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
     const angle = Math.atan2(to[0] - from[0], to[1] - from[1]) * 180 / Math.PI
-    const arrow = createMarker(mid, 'survey-line-arrow', arrowHtml(angle), 720, true)
+    const arrow = createMarker(mid, 'survey-line-arrow', arrowHtml(angle), 620, true)
     ;((arrow as any).__content as HTMLElement).addEventListener('click', (event) => {
       event.stopPropagation()
       openLineMenu(lineData, from, to)
@@ -834,11 +998,11 @@ function openBoxMenu(box: SurveyBox) {
   syncBoxSelection()
   const enableSequence = ++boxDeleteEnableSequence
   const center: [number, number] = [(box.west + box.east) / 2, (box.south + box.north) / 2]
-  menuWindow.setContent(`<div class="survey-line-menu"><div class="survey-line-menu-title">差异标识 ${e(box.id)}</div><button class="survey-line-menu-btn danger" data-box-action="remove" data-box-id="${e(box.id)}" disabled title="请稍候 500ms，防止误删"><span class="icon">🗑</span>删除标识框</button></div>`)
+  menuWindow.setContent(`<div class="survey-line-menu survey-box-menu"><div class="survey-line-menu-title">差异标识 ${e(box.id)}</div><button class="survey-line-menu-btn" data-box-action="note" data-box-id="${e(box.id)}"><span class="icon">📝</span><span class="label">${box.note ? '编辑备注' : '添加备注'}</span></button><button class="survey-line-menu-btn danger" data-box-action="remove" data-box-id="${e(box.id)}" disabled title="请稍候 500ms，防止误删"><span class="icon">🗑</span><span class="label">删除标识框</span></button></div>`)
   menuWindow.open(map, center)
   window.setTimeout(() => {
     if (enableSequence !== boxDeleteEnableSequence || selectedBoxId !== box.id) return
-    const button = document.querySelector<HTMLButtonElement>(`.survey-line-menu-btn[data-box-id="${box.id}"]`)
+    const button = document.querySelector<HTMLButtonElement>(`.survey-line-menu-btn[data-box-action="remove"][data-box-id="${box.id}"]`)
     if (button) {
       button.disabled = false
       button.title = '删除标识框'
@@ -854,6 +1018,7 @@ function syncBoxSelection() {
 
 function clearBoxSelection() {
   selectedBoxId = null
+  if (!boxResizeGesture && !boxMoveGesture) setMapResizeCursor()
   syncBoxSelection()
 }
 
@@ -862,9 +1027,18 @@ function renderSurveyBoxes() {
   clearLayer('box')
   boxOverlayMap.clear()
   props.surveyBoxes.forEach((box) => {
-    const rectangle = new AMapApi.Rectangle({ bounds: boxBounds(box), ...SURVEY_BOX_STYLE, bubble: false, cursor: props.mode === 'edit' ? 'move' : 'default' })
+    const rectangle = new AMapApi.Rectangle({ bounds: boxBounds(box), ...SURVEY_BOX_STYLE, bubble: false, cursor: 'default' })
     rectangle.on('click', () => openBoxMenu(box))
-    bindTip(rectangle, `<b>差异标识 ${e(box.id)}</b>`)
+    const noteHtml = box.note?.trim() ? `<br><span class="survey-box-tip-note">${e(box.note.trim())}</span>` : ''
+    const tipHtml = `<div class="survey-box-tip"><b>差异标识 ${e(box.id)}</b>${noteHtml}</div>`
+    rectangle.on('mouseover', () => {
+      if (props.mode !== 'view' || pinnedSurveyPointId) return
+      const topCenter: [number, number] = [(box.west + box.east) / 2, box.north]
+      openTip(topCenter, tipHtml)
+    })
+    rectangle.on('mouseout', () => {
+      if (!pinnedSurveyPointId) tipWindow?.close()
+    })
     addLayer('box', rectangle)
     boxOverlayMap.set(box.id, rectangle)
   })
@@ -911,7 +1085,7 @@ function handleMapClick(event: any) {
   if (props.mode === 'add-point') showAddMenu(position)
   else if (props.mode === 'connect') handleConnectMapClick(position)
   else {
-    if (props.mode === 'view') clearPinnedSurveyPointTip()
+    if (props.mode === 'view') clearSurveyPointSelection()
     menuWindow?.close()
     clearBoxSelection()
     clearFacilitySelection()
@@ -929,6 +1103,13 @@ function handleMouseMove(event: any) {
 
 function onDocumentClick(event: MouseEvent) {
   const target = event.target as HTMLElement
+  const photoButton = target.closest('.survey-point-hover-image') as HTMLElement | null
+  if (photoButton?.dataset.photoUrl) {
+    photoButton.classList.add('is-opened')
+    photoButton.addEventListener('mouseleave', () => photoButton.classList.remove('is-opened'), { once: true })
+    window.open(photoButton.dataset.photoUrl, '_blank', 'noopener,noreferrer')
+    return
+  }
   const addButton = target.closest('.survey-add-menu-btn') as HTMLElement | null
   if (addButton) {
     const type = addButton.dataset.type as SurveyPointType
@@ -945,6 +1126,22 @@ function onDocumentClick(event: MouseEvent) {
     return
   }
   const boxButton = target.closest('.survey-line-menu-btn') as HTMLElement | null
+  if (boxButton?.dataset.boxAction === 'note' && boxButton.dataset.boxId) {
+    const box = props.surveyBoxes.find((item) => item.id === boxButton.dataset.boxId)
+    menuWindow?.close()
+    if (!box) return
+    void ElMessageBox.prompt('请输入该差异标识框的备注信息', '方框备注', {
+      inputValue: box.note ?? '',
+      inputType: 'textarea',
+      inputPlaceholder: '例如：勘测管线与官方管线存在位置差异',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+    }).then(({ value }) => {
+      emit('update-box-note', { id: box.id, note: value.trim() })
+      ElMessage.success('备注已保存')
+    }).catch(() => undefined)
+    return
+  }
   if (boxButton?.dataset.boxAction === 'remove' && boxButton.dataset.boxId) {
     boxDeleteEnableSequence++
     selectedBoxId = null
@@ -1123,6 +1320,7 @@ onMounted(async () => {
     menuWindow = new AMapApi.InfoWindow({ isCustom: false, offset: new AMapApi.Pixel(0, -8), closeWhenClickMap: false })
     map.on('click', handleMapClick)
     map.on('mousemove', handleMouseMove)
+    map.on('zoomend', renderSurveyLines)
     mapRef.value?.addEventListener('pointerdown', onMapPointerDownCapture, true)
     mapRef.value?.addEventListener('pointermove', onMapPointerMoveCapture, true)
     mapRef.value?.addEventListener('pointerup', onMapPointerUpCapture, true)
@@ -1161,6 +1359,7 @@ watch(() => props.regulatorsVisible, (value) => toggleLayer('regulator', value))
 watch(() => props.surveyPointsVisible, (value) => toggleLayer('point', value))
 watch(() => props.surveyLinesVisible, (value) => { toggleLayer('line', value); toggleLayer('arrow', value) })
 watch(() => props.mode, (mode) => {
+  setMapResizeCursor()
   menuWindow?.close()
   clearPinnedSurveyPointTip()
   clearBoxSelection()
@@ -1171,6 +1370,7 @@ watch(() => props.mode, (mode) => {
 })
 
 onBeforeUnmount(() => {
+  setMapResizeCursor()
   photoLoadSequence++
   releasePhotoUrls()
   hoverPhotoLoadSequence++
@@ -1187,6 +1387,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', restoreMapDrag)
   map?.off('click', handleMapClick)
   map?.off('mousemove', handleMouseMove)
+  map?.off('zoomend', renderSurveyLines)
   tipWindow?.close()
   menuWindow?.close()
   map?.destroy()
@@ -1229,7 +1430,7 @@ onBeforeUnmount(() => {
             <div class="survey-editor-hint">拖动滑块实时预览,或点下方常用角度</div>
           </div>
           <div class="survey-editor-row"><label class="survey-editor-label">埋深(米)</label><el-input-number v-model="editForm.depth" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></div>
-          <div class="survey-editor-row"><label class="survey-editor-label">电流</label><el-input-number v-model="editForm.current" :step="0.1" :precision="3" size="small" style="width:100%" /></div>
+          <div class="survey-editor-row"><label class="survey-editor-label">电流（mA）</label><el-input-number v-model="editForm.current" :step="0.1" :precision="3" size="small" style="width:100%" /></div>
           <div class="survey-editor-row survey-photo-entry">
             <label class="survey-editor-label">照片留痕</label>
             <input ref="photoInputRef" class="survey-photo-input" type="file" accept="image/*" multiple @change="onPhotosSelected" />
