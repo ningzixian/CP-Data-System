@@ -7,6 +7,8 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    CoatingDetectForm: typeof import('./src/components/CoatingDetectForm.vue')['default']
+    DcStrayCurrentForm: typeof import('./src/components/DcStrayCurrentForm.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCard: typeof import('element-plus/es')['ElCard']
     ElCol: typeof import('element-plus/es')['ElCol']
@@ -37,9 +39,12 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     InspectionForm: typeof import('./src/components/InspectionForm.vue')['default']
+    InsulationPerformanceForm: typeof import('./src/components/InsulationPerformanceForm.vue')['default']
     MapView: typeof import('./src/components/MapView.vue')['default']
+    PipeGroundPotentialForm: typeof import('./src/components/PipeGroundPotentialForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SoilResistivityForm: typeof import('./src/components/SoilResistivityForm.vue')['default']
     StatusTag: typeof import('./src/components/StatusTag.vue')['default']
     SurveyMapView: typeof import('./src/components/SurveyMapView.vue')['default']
     UnitCard: typeof import('./src/components/UnitCard.vue')['default']

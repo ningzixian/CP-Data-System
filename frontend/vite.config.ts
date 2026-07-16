@@ -17,9 +17,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // 不 watch 用户数据目录（避免 CSV 文件被锁住时 Vite 报错）
+    // 不 watch 用户数据和内置演示照片（避免 Windows 文件锁导致 Vite EBUSY）
     watch: {
-      ignored: ['**/pipe data/**', '**/pipe_data/**'],
+      ignored: [
+        '**/pipe data/**',
+        '**/pipe_data/**',
+        '**/public/data/demo/soil/*.jpg',
+        '**/public/data/demo/dc-stray/*.jpg',
+      ],
     },
     proxy: {
       // 后端联调时配置：所有 /api/* 请求代理到后端服务

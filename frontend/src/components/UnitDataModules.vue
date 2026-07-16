@@ -6,8 +6,10 @@ import type { InspectionItemCode, InspectionRecord } from '@/types/models'
 
 withDefaults(defineProps<{
   visible?: boolean
+  activeCode?: InspectionItemCode | null
 }>(), {
   visible: false,
+  activeCode: null,
 })
 
 const emit = defineEmits<{
@@ -27,7 +29,7 @@ const MODULE_CONFIGS: ModuleConfig[] = [
   { code: 'SOIL_RESISTIVITY', name: '土壤电阻率', field: 'resistivity', unit: 'Ω·m' },
   { code: 'DC_STRAY_CURRENT', name: '直流杂散电流', field: 'current_density', unit: 'μA/cm²' },
   { code: 'COATING_DETECT', name: '防腐层检测', field: 'damage_count' },
-  { code: 'PIPE_GROUND_POTENTIAL', name: '管地腐蚀电位', field: 'off_potential', unit: 'V' },
+  { code: 'PIPE_GROUND_POTENTIAL', name: '管地腐蚀电位', field: 'natural_potential', unit: 'V' },
   { code: 'ELECTRIC_CONTINUITY', name: '管道电联通性', field: 'is_connected' },
   { code: 'INLET_PARAM', name: '引入口参数', field: 'diameter', unit: 'mm' },
 ]
@@ -42,12 +44,6 @@ const MODULE_PALETTES = [
   { primary: '#a21caf', secondary: '#e879f9', soft: '#fae8ff' },
 ]
 
-const DISABLED_MODULE_CODES = new Set<InspectionItemCode>([
-  'DC_STRAY_CURRENT',
-  'PIPE_GROUND_POTENTIAL',
-  'ELECTRIC_CONTINUITY',
-])
-
 const store = useCpStore()
 
 const latestRecords = computed(() => {
@@ -61,7 +57,14 @@ function hasValue(value: unknown): boolean {
 }
 
 function formatRepresentativeValue(config: ModuleConfig, record?: InspectionRecord): string {
-  if (!record || record.status === 'pending') return '未检测'
+  if (!record) return '未检测'
+
+  if (config.code === 'PIPE_GROUND_POTENTIAL') {
+    const average = Number(record.result_data?.natural_potential ?? record.measured_value)
+    if (Number.isFinite(average)) return `${average.toFixed(4)} V`
+  }
+
+  if (record.status === 'pending') return '未检测'
 
   const raw = record.result_data?.[config.field]
   if (hasValue(raw)) {
@@ -113,11 +116,9 @@ function moduleStyle(index: number): Record<string, string> {
       v-for="(module, index) in visible ? modules : []"
       :key="module.code"
       type="button"
-      class="unit-data-module"
-      :class="DISABLED_MODULE_CODES.has(module.code) ? 'is-disabled' : 'is-enabled'"
+      class="unit-data-module is-enabled"
+      :class="{ 'is-active': activeCode === module.code }"
       :style="moduleStyle(index)"
-      :disabled="DISABLED_MODULE_CODES.has(module.code)"
-      :aria-disabled="DISABLED_MODULE_CODES.has(module.code)"
       @click="emit('select', module.code)"
     >
       <span class="unit-data-module-icon" aria-hidden="true">

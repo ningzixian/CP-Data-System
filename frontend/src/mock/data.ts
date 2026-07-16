@@ -224,10 +224,225 @@ const sixLiRecords: InspectionRecord[] = Array.from({ length: 10 }, (_, index) =
   return makeDemoRecords(unitId, 6000 + index * 10, allPassedStatuses)
 }).flat()
 
+// 三里 FSKZ755856 土壤电阻率现场演示数据。表针读数约 7 Ω，地钎间距按照片布置估算为 5 m。
+const SAN_LI_FSKZ755856_UNIT_ID = 32
+const SAN_LI_SOIL_DEMO_POINT_ID = 755856201
+const SAN_LI_SOIL_DEMO_POINT_LNG = 116.49750
+const SAN_LI_SOIL_DEMO_POINT_LAT = 39.76330
+const sanLiSoilResistivityRecord: InspectionRecord = {
+  id: 7558,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'SOIL_RESISTIVITY',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'SOIL_RESISTIVITY')!.name,
+  work_hours: 0.5,
+  personnel_count: 2,
+  personnel_level: '中级',
+  inspector: '现场检测人员',
+  inspection_date: '2026-07-03T11:00:28.000+08:00',
+  status: 'passed',
+  result_summary: '四极法演示测试：仪表读数约 7 Ω，估算土壤电阻率 219.911 Ω·m',
+  result_data: {
+    method: '四极法（Wenner）',
+    point_count: 1,
+    completed_point_count: 1,
+    resistivity: 219.911,
+    test_points: [{
+      id: SAN_LI_SOIL_DEMO_POINT_ID,
+      name: '三里土壤电阻率测试点 1',
+      lng: SAN_LI_SOIL_DEMO_POINT_LNG,
+      lat: SAN_LI_SOIL_DEMO_POINT_LAT,
+      ground_rod_count: 4,
+      ground_rod_spacing: 5,
+      test_current: null,
+      test_voltage: null,
+      measured_resistance: 7,
+      geometric_coefficient: 31.4159,
+      resistivity: 219.911,
+      note: '根据现场照片生成的演示数据：仪表量程 ×1，表针读数约 7 Ω；地钎间距按 5 m 估算。',
+      photo_urls: [
+        { name: '接地电阻仪表读数.jpg', url: '/data/demo/soil/FSKZ755856-meter.jpg' },
+        { name: '四极法地钎现场布置.jpg', url: '/data/demo/soil/FSKZ755856-layout.jpg' },
+      ],
+    }],
+  },
+  measured_value: 219.911,
+  unit: 'Ω·m',
+  note: '演示数据由现场照片识别与估算生成，正式成果应以原始检测记录为准。',
+  created_at: '2026-07-03T11:00:28.000+08:00',
+  updated_at: '2026-07-03T11:00:28.000+08:00',
+}
+
+const sanLiDcStrayCurrentRecord: InspectionRecord = {
+  id: 7559,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'DC_STRAY_CURRENT',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'DC_STRAY_CURRENT')!.name,
+  work_hours: 0.5,
+  personnel_count: 2,
+  personnel_level: '中级',
+  inspector: '现场检测人员',
+  inspection_date: '2026-07-16T09:34:00.000+08:00',
+  status: 'passed',
+  result_summary: '两处监测点共记录 5 个管地直流电位样本，总体范围 -0.6879～-0.5061 V',
+  result_data: {
+    method: '管地直流电位法',
+    point_count: 2,
+    completed_point_count: 2,
+    sample_count: 5,
+    average_potential: -0.6144,
+    potential_shift: 181.8,
+    monitoring_points: [
+      {
+        id: 755856301,
+        name: '直流电位监测点 1',
+        lng: 116.49750,
+        lat: 39.76330,
+        potential_readings: [-0.6856, -0.6879, -0.6856],
+        min_potential: -0.6879,
+        max_potential: -0.6856,
+        average_potential: -0.6864,
+        potential_fluctuation: 2.3,
+        reference_electrode: 'Cu/CuSO₄',
+        note: '根据仪表照片识别的 VDC 读数。',
+        photo_urls: [
+          { name: '监测点1-读数-0.6856V-1.jpg', url: '/data/demo/dc-stray/FSKZ755856-point1-reading1.jpg' },
+          { name: '监测点1-读数-0.6879V.jpg', url: '/data/demo/dc-stray/FSKZ755856-point1-reading2.jpg' },
+          { name: '监测点1-读数-0.6856V-2.jpg', url: '/data/demo/dc-stray/FSKZ755856-point1-reading3.jpg' },
+        ],
+      },
+      {
+        id: 755856302,
+        name: '直流电位监测点 2',
+        lng: 116.49772,
+        lat: 39.76318,
+        potential_readings: [-0.5061, -0.5069],
+        min_potential: -0.5069,
+        max_potential: -0.5061,
+        average_potential: -0.5065,
+        potential_fluctuation: 0.8,
+        reference_electrode: 'Cu/CuSO₄',
+        note: '表笔接触现场测试端子，读数由照片识别。',
+        photo_urls: [
+          { name: '监测点2-读数-0.5061V.jpg', url: '/data/demo/dc-stray/FSKZ755856-point2-reading1.jpg' },
+          { name: '监测点2-读数-0.5069V.jpg', url: '/data/demo/dc-stray/FSKZ755856-point2-reading2.jpg' },
+        ],
+      },
+    ],
+  },
+  measured_value: -0.6144,
+  unit: 'V',
+  note: '演示数据根据现场照片识别生成；照片未提供电流密度，未据此生成正式杂散电流结论。',
+  created_at: '2026-07-16T09:34:00.000+08:00',
+  updated_at: '2026-07-16T09:34:00.000+08:00',
+}
+
+// 《南海家园三里小区低压线破损点记录》中的 1、2 号楼破损点。
+// 原始 X/Y 作为来源记录保留；地图展示坐标按现场描述校正在对应楼栋的官方低压管线上。
+const sanLiCoatingDetectRecord: InspectionRecord = {
+  id: 7560,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'COATING_DETECT',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'COATING_DETECT')!.name,
+  work_hours: 0.5,
+  personnel_count: 2,
+  personnel_level: '中级',
+  inspector: '讯腾智科',
+  inspection_date: '2025-10-26T09:00:00.000+08:00',
+  status: 'exception',
+  result_summary: '南海家园三里 1、2 号楼共发现 2 处低压管线防腐层疑似破损点',
+  result_data: {
+    method: '皮尔逊法',
+    device: '皮尔逊 SL-2818',
+    pipeline_name: '南海家园三里小区低压线',
+    pipeline_length: 3756,
+    damage_count: 2,
+    completed_point_count: 2,
+    damage_locations: [
+      {
+        id: 755856401,
+        name: '68-1',
+        building: '1号楼',
+        location_desc: '1号楼四单元西北侧路牙北 1.4m',
+        lng: 116.49796915,
+        lat: 39.76340551,
+        source_x: 512088.77,
+        source_y: 288472.32,
+        buried_depth: 1.1,
+        leakage_potential: 450,
+        surface: '绿地',
+        severity: '疑似破损',
+        note: '统计表序号 1；现场标识编号 68-1。',
+        photo_urls: [],
+      },
+      {
+        id: 755856402,
+        name: '68-2',
+        building: '2号楼',
+        location_desc: '2号楼二单元北侧路牙下',
+        lng: 116.497345312722,
+        lat: 39.7636082820188,
+        source_x: 511887.95,
+        source_y: 288487.35,
+        buried_depth: 1.1,
+        leakage_potential: 450,
+        surface: '沥青',
+        severity: '疑似破损',
+        note: '统计表序号 2；现场标识编号 68-2。展示位置已校正在2号楼二单元楼前官方低压管线上。',
+        photo_urls: [],
+      },
+    ],
+  },
+  measured_value: 2,
+  unit: '处',
+  note: '数据来自 2025 年 10 月 26 日统计表；参考图片未导入，照片由用户在防腐层检测抽屉中自行上传。',
+  created_at: '2025-10-26T09:00:00.000+08:00',
+  updated_at: '2025-10-26T09:00:00.000+08:00',
+}
+
+// 三里 FSKZ755856 管地腐蚀电位演示数据。照片仅用于读取仪表数值，不随代码内置。
+// 最左侧引入口 N54R328A067 读数为 -0.6182 VDC，其余引入口由界面按设施数据补为空记录。
+const SAN_LI_LEFTMOST_INLET_ID = 426159
+const sanLiPipeGroundPotentialRecord: InspectionRecord = {
+  id: 7561,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'PIPE_GROUND_POTENTIAL',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'PIPE_GROUND_POTENTIAL')!.name,
+  work_hours: 0.25,
+  personnel_count: 1,
+  personnel_level: '中级',
+  inspector: '现场检测人员',
+  inspection_date: '2026-01-07T09:48:00.000+08:00',
+  status: 'pending',
+  result_summary: '已完成 1 个引入口自然电位测试，其余引入口待录入',
+  result_data: {
+    method: '自然电位法',
+    inlet_count: 28,
+    completed_inlet_count: 1,
+    natural_potential: -0.6182,
+    inlets: [{
+      inlet_id: SAN_LI_LEFTMOST_INLET_ID,
+      inlet_code: 'N54R328A067',
+      natural_potential: -0.6182,
+      reference_electrode: 'Cu/CuSO₄',
+      test_method: '自然电位法',
+      note: '6号楼1单元现场仪表读数；照片由用户后续上传。',
+    }],
+  },
+  measured_value: -0.6182,
+  unit: 'V',
+  note: '读数根据现场照片识别，照片未内置。当前检测尚未覆盖全部引入口，因此状态保持进行中。',
+  created_at: '2026-01-07T09:48:00.000+08:00',
+  updated_at: '2026-01-07T09:48:00.000+08:00',
+}
+
 export const MOCK_RECORDS: InspectionRecord[] = [
   ...nhjyRecords,
   ...demoRecords,
   ...sixLiRecords,
+  sanLiSoilResistivityRecord,
+  sanLiDcStrayCurrentRecord,
+  sanLiCoatingDetectRecord,
+  sanLiPipeGroundPotentialRecord,
 ]
 
 const MOCK_RECORDS_STORAGE_KEY = 'cp-data-system:mock-records'
@@ -242,27 +457,126 @@ function recordKey(record: InspectionRecord): string {
   return `${record.unit_id}:${record.item_code}`
 }
 
+function migrateSanLiSoilDemoRecord(record: InspectionRecord): InspectionRecord {
+  if (record.id !== sanLiSoilResistivityRecord.id) return record
+  const testPoints = Array.isArray(record.result_data?.test_points)
+    ? record.result_data.test_points.map((point: Record<string, unknown>) => Number(point.id) === SAN_LI_SOIL_DEMO_POINT_ID
+      ? { ...point, lng: SAN_LI_SOIL_DEMO_POINT_LNG, lat: SAN_LI_SOIL_DEMO_POINT_LAT }
+      : point)
+    : sanLiSoilResistivityRecord.result_data?.test_points
+  return {
+    ...record,
+    unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+    result_data: { ...(record.result_data ?? {}), test_points: testPoints },
+  }
+}
+
+function migrateSanLiCoatingDemoRecord(record: InspectionRecord): InspectionRecord {
+  if (record.unit_id !== SAN_LI_FSKZ755856_UNIT_ID || record.item_code !== 'COATING_DETECT') return record
+  const existingPoints = Array.isArray(record.result_data?.damage_locations)
+    ? record.result_data.damage_locations as Array<Record<string, unknown>>
+    : []
+  const baselinePoints = Array.isArray(sanLiCoatingDetectRecord.result_data?.damage_locations)
+    ? sanLiCoatingDetectRecord.result_data.damage_locations as Array<Record<string, unknown>>
+    : []
+
+  // 早期持久化记录可能已有“2 处破损”的统计和点位数组，但点内没有经纬度。
+  // 这类记录会让小方块显示数量，却无法在地图上创建 Marker。
+  // 按 id / 名称补齐两处内置演示点；浏览器里已经编辑过的有效坐标继续优先保留。
+  const repairedPoints = baselinePoints.map((baseline) => {
+    const existing = existingPoints.find((point) =>
+      Number(point.id) === Number(baseline.id)
+      || String(point.name ?? '') === String(baseline.name ?? ''),
+    )
+    if (!existing) return baseline
+    const existingLng = Number(existing.lng)
+    const existingLat = Number(existing.lat)
+    const isLegacyPoint2Position = Number(baseline.id) === 755856402
+      && Math.abs(existingLng - 116.49563470) < 1e-8
+      && Math.abs(existingLat - 39.76355064) < 1e-8
+    return {
+      ...baseline,
+      ...existing,
+      lng: Number.isFinite(existingLng) && !isLegacyPoint2Position ? existingLng : baseline.lng,
+      lat: Number.isFinite(existingLat) && !isLegacyPoint2Position ? existingLat : baseline.lat,
+      note: isLegacyPoint2Position ? baseline.note : (existing.note ?? baseline.note),
+    }
+  })
+
+  return {
+    ...sanLiCoatingDetectRecord,
+    ...record,
+    unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+    status: 'exception',
+    result_summary: record.result_summary || sanLiCoatingDetectRecord.result_summary,
+    result_data: {
+      ...(sanLiCoatingDetectRecord.result_data ?? {}),
+      ...(record.result_data ?? {}),
+      damage_count: 2,
+      completed_point_count: 2,
+      damage_locations: repairedPoints,
+    },
+    measured_value: 2,
+    unit: '处',
+  }
+}
+
+function migrateSanLiPipePotentialRecord(record: InspectionRecord): InspectionRecord {
+  if (record.unit_id !== SAN_LI_FSKZ755856_UNIT_ID || record.item_code !== 'PIPE_GROUND_POTENTIAL') return record
+  const existingInlets = Array.isArray(record.result_data?.inlets)
+    ? record.result_data.inlets as Array<Record<string, unknown>>
+    : []
+  const baselineReading = (sanLiPipeGroundPotentialRecord.result_data?.inlets as Array<Record<string, unknown>>)[0]
+  const existingReading = existingInlets.find((reading) => Number(reading.inlet_id) === SAN_LI_LEFTMOST_INLET_ID)
+  const inlets = existingReading
+    ? existingInlets
+    : [baselineReading, ...existingInlets]
+  const completedCount = inlets.filter((reading) => {
+    const value = reading.natural_potential
+    return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+  }).length
+  return {
+    ...sanLiPipeGroundPotentialRecord,
+    ...record,
+    result_data: {
+      ...(sanLiPipeGroundPotentialRecord.result_data ?? {}),
+      ...(record.result_data ?? {}),
+      inlet_count: Math.max(28, Number(record.result_data?.inlet_count) || 0),
+      completed_inlet_count: completedCount,
+      inlets,
+    },
+    measured_value: record.measured_value ?? -0.6182,
+    unit: 'V',
+  }
+}
+
 function loadPersistedRecords(): InspectionRecord[] | null {
   if (typeof window === 'undefined') return null
   try {
     const value = window.localStorage.getItem(MOCK_RECORDS_STORAGE_KEY)
     if (!value) return null
     const parsed = JSON.parse(value) as InspectionRecord[] | PersistedMockRecords
-    if (!Array.isArray(parsed)) {
-      return parsed.version === MOCK_RECORDS_STORAGE_VERSION && Array.isArray(parsed.records)
-        ? parsed.records.filter((record) => ITEM_CODES.includes(record.item_code))
-        : null
-    }
+    const persistedSource = Array.isArray(parsed)
+      ? parsed
+      : (Array.isArray(parsed.records) ? parsed.records : null)
+    if (!persistedSource) return null
 
-    // v1 保存的是裸数组。迁移时保留已有编辑，但按本次测试要求将六里单元统一设为合格。
-    const persistedByKey = new Map(parsed.map((record) => [recordKey(record), record]))
+    // 早期演示数据曾按 CSV 原始行号误绑到 37（FSKZ755863）。
+    // 项目实际会过滤非低压单元，FSKZ755856 的真实运行时 ID 为 32。
+    const persisted = persistedSource
+      .map(migrateSanLiSoilDemoRecord)
+      .map(migrateSanLiCoatingDemoRecord)
+      .map(migrateSanLiPipePotentialRecord)
+
+    // 合并新增的内置演示数据，同时保留浏览器中已有的编辑结果。
+    const persistedByKey = new Map(persisted.map((record) => [recordKey(record), record]))
     const baselineKeys = new Set(MOCK_RECORDS.map(recordKey))
     const migrated = MOCK_RECORDS.map((record) => {
       return record.unit_id >= 16 && record.unit_id <= 25
         ? record
         : (persistedByKey.get(recordKey(record)) ?? record)
     })
-    parsed.forEach((record) => {
+    persisted.forEach((record) => {
       if (!baselineKeys.has(recordKey(record))) migrated.push(record)
     })
     window.localStorage.setItem(MOCK_RECORDS_STORAGE_KEY, JSON.stringify({

@@ -5,8 +5,17 @@ import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import InspectionForm from '@/components/InspectionForm.vue'
+import InsulationPerformanceForm from '@/components/InsulationPerformanceForm.vue'
+import SoilResistivityForm from '@/components/SoilResistivityForm.vue'
+import DcStrayCurrentForm from '@/components/DcStrayCurrentForm.vue'
+import CoatingDetectForm from '@/components/CoatingDetectForm.vue'
+import PipeGroundPotentialForm from '@/components/PipeGroundPotentialForm.vue'
 import UnitInfoCard from '@/components/UnitInfoCard.vue'
 import UnitDataModules from '@/components/UnitDataModules.vue'
+import { soilResistivityPoints } from '@/utils/soilResistivity'
+import { dcStrayCurrentPoints } from '@/utils/dcStrayCurrent'
+import { coatingDamagePoints } from '@/utils/coatingDetect'
+import { inletPotentialReadings, hasNaturalPotential } from '@/utils/pipeGroundPotential'
 import type { CorrosionUnit, InspectionItemCode } from '@/types/models'
 
 const store = useCpStore()
@@ -17,6 +26,7 @@ const activeTab = ref('')
 const dataModeActive = ref(false)
 const dataModulesVisible = ref(false)
 const dataModulesClosing = ref(false)
+const activeDataModule = ref<InspectionItemCode | null>(null)
 
 /** 五种设施的显隐状态,左下角图例面板的 checkbox 控制
  *  - 全部默认 true,跟改之前行为一致
@@ -159,6 +169,7 @@ function resetDataModuleMode() {
   dataModulesVisible.value = false
   dataModulesClosing.value = false
   dataModeActive.value = false
+  activeDataModule.value = null
 }
 
 function closeDataModuleMode() {
@@ -166,6 +177,7 @@ function closeDataModuleMode() {
   clearDataModulesTimer()
   if (!dataModulesVisible.value) {
     dataModeActive.value = false
+    activeDataModule.value = null
     return
   }
   dataModulesClosing.value = true
@@ -174,6 +186,7 @@ function closeDataModuleMode() {
     dataModulesTimer = null
     dataModulesClosing.value = false
     dataModeActive.value = false
+    activeDataModule.value = null
   }, DATA_MODULE_CLOSE_MS)
 }
 
@@ -211,8 +224,15 @@ function selectUnit(u: CorrosionUnit) {
  */
 watch(() => store.selectedUnit?.id, (newId, oldId) => {
   if (newId !== oldId) {
-    // 数据模块打开时切换单元：先完成收牌，再允许新单元信息卡片入场。
-    if (dataModeActive.value) closeDataModuleMode()
+    // 数据模块展开时允许直接点击其他控制单元切换数据：
+    // 保留整组小方块，只取消当前具体模块的选中状态并刷新为新单元的数据。
+    if (dataModeActive.value) {
+      clearDataModulesTimer()
+      dataModulesClosing.value = false
+      dataModulesVisible.value = true
+      activeDataModule.value = null
+      drawerOpen.value = false
+    }
     else resetDataModuleMode()
   }
   if (newId === undefined || newId === oldId) return
@@ -271,8 +291,41 @@ function returnToUnitCard() {
 
 /** 数据模块点击预留接口：后续可按检测项目编码打开对应的数据视图。 */
 function onDataModuleSelect(code: InspectionItemCode) {
-  // 当前阶段按需求不执行页面跳转或数据操作。
-  void code
+  activeDataModule.value = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' ? code : null
+}
+
+function clearActiveDataModule() {
+  activeDataModule.value = null
+}
+
+function openInsulationEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'JOINT_VERIFY'
+  drawerOpen.value = true
+}
+
+function openSoilEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'SOIL_RESISTIVITY'
+  drawerOpen.value = true
+}
+
+function openDcStrayEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'DC_STRAY_CURRENT'
+  drawerOpen.value = true
+}
+
+function openCoatingEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'COATING_DETECT'
+  drawerOpen.value = true
+}
+
+function openPipePotentialEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'PIPE_GROUND_POTENTIAL'
+  drawerOpen.value = true
 }
 
 /** 标记"上次点的大圆名字",watch 里如果新值跟它匹配就跳过
@@ -370,6 +423,48 @@ onBeforeUnmount(() => {
 
 const selectedUnit = computed(() => store.selectedUnit)
 
+const selectedUnitInlets = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return []
+  return (store.facilities?.inlets ?? []).filter((inlet) => inlet.unit_id === unitId)
+})
+
+const selectedUnitSoilPoints = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return []
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'SOIL_RESISTIVITY')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return soilResistivityPoints(record)
+})
+
+const selectedUnitDcStrayPoints = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return []
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'DC_STRAY_CURRENT')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return dcStrayCurrentPoints(record)
+})
+
+const selectedUnitCoatingPoints = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return []
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'COATING_DETECT')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return coatingDamagePoints(record)
+})
+
+const selectedUnitPotentialCompleted = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return 0
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'PIPE_GROUND_POTENTIAL')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return [...inletPotentialReadings(record).values()].filter(hasNaturalPotential).length
+})
+
 function unitCenterText(unit: CorrosionUnit): string {
   return unit.lng !== undefined && unit.lat !== undefined
     ? `${unit.lng.toFixed(6)}, ${unit.lat.toFixed(6)}`
@@ -451,7 +546,42 @@ const tabItems = computed(() =>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" @select="selectUnit" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" />
+      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" :active-data-module="activeDataModule" :data-module-mode="dataModeActive" @select="selectUnit" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" @clear-data-module="clearActiveDataModule" />
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'JOINT_VERIFY' && selectedUnit" class="insulation-map-toolbar">
+          <div class="insulation-map-toolbar-icon">Ω</div>
+          <div><strong>绝缘性能展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitInlets.length }} 个引入口</span></div>
+          <button type="button" @click="openInsulationEditor">编辑绝缘数据</button>
+        </div>
+      </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'SOIL_RESISTIVITY' && selectedUnit" class="insulation-map-toolbar soil-map-toolbar">
+          <div class="insulation-map-toolbar-icon">ρ</div>
+          <div><strong>土壤电阻率展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitSoilPoints.length }} 个测试位置</span></div>
+          <button type="button" @click="openSoilEditor">编辑检测数据</button>
+        </div>
+      </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'DC_STRAY_CURRENT' && selectedUnit" class="insulation-map-toolbar dc-map-toolbar">
+          <div class="insulation-map-toolbar-icon">V</div>
+          <div><strong>直流杂散电流展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitDcStrayPoints.length }} 个监测点</span></div>
+          <button type="button" @click="openDcStrayEditor">编辑直流数据</button>
+        </div>
+      </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'COATING_DETECT' && selectedUnit" class="insulation-map-toolbar coating-map-toolbar">
+          <div class="insulation-map-toolbar-icon">×</div>
+          <div><strong>防腐层破损点展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitCoatingPoints.length }} 处破损点</span></div>
+          <button type="button" @click="openCoatingEditor">编辑破损点数据</button>
+        </div>
+      </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'PIPE_GROUND_POTENTIAL' && selectedUnit" class="insulation-map-toolbar potential-map-toolbar">
+          <div class="insulation-map-toolbar-icon">V</div>
+          <div><strong>自然电位展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitPotentialCompleted }}/{{ selectedUnitInlets.length }} 个引入口已检测</span></div>
+          <button type="button" @click="openPipePotentialEditor">编辑自然电位</button>
+        </div>
+      </Transition>
       <div class="map-legend">
         <!-- 进度状态图例(只读,纯说明) -->
         <div class="legend-section legend-section--readonly">
@@ -494,6 +624,7 @@ const tabItems = computed(() =>
 
     <UnitDataModules
       :visible="dataModulesVisible && !!selectedUnit"
+      :active-code="activeDataModule"
       @return="returnToUnitCard"
       @select="onDataModuleSelect"
     />
@@ -506,7 +637,7 @@ const tabItems = computed(() =>
 
     <el-drawer
       v-model="drawerOpen"
-      :title="selectedUnit ? `单元详情：${selectedUnit.name}` : '单元详情'"
+      :title="selectedUnit ? (activeDataModule === 'JOINT_VERIFY' ? `绝缘性能：${selectedUnit.name}` : activeDataModule === 'SOIL_RESISTIVITY' ? `土壤电阻率：${selectedUnit.name}` : activeDataModule === 'DC_STRAY_CURRENT' ? `直流杂散电流：${selectedUnit.name}` : activeDataModule === 'COATING_DETECT' ? `防腐层检测：${selectedUnit.name}` : activeDataModule === 'PIPE_GROUND_POTENTIAL' ? `管地腐蚀电位：${selectedUnit.name}` : `单元详情：${selectedUnit.name}`) : '单元详情'"
       size="80%"
       direction="rtl"
       @closed="onDrawerClosed"
@@ -553,7 +684,35 @@ const tabItems = computed(() =>
                 <StatusTag v-if="it.status !== 'pending'" :status="it.status" short />
               </span>
             </template>
-            <InspectionForm :unit-id="selectedUnit.id" :item="store.items[idx]" />
+            <InsulationPerformanceForm
+              v-if="it.code === 'JOINT_VERIFY'"
+              :unit-id="selectedUnit.id"
+              :inlets="selectedUnitInlets"
+            />
+            <SoilResistivityForm
+              v-else-if="it.code === 'SOIL_RESISTIVITY'"
+              :unit-id="selectedUnit.id"
+              :unit-lng="selectedUnit.lng"
+              :unit-lat="selectedUnit.lat"
+            />
+            <DcStrayCurrentForm
+              v-else-if="it.code === 'DC_STRAY_CURRENT'"
+              :unit-id="selectedUnit.id"
+              :unit-lng="selectedUnit.lng"
+              :unit-lat="selectedUnit.lat"
+            />
+            <CoatingDetectForm
+              v-else-if="it.code === 'COATING_DETECT'"
+              :unit-id="selectedUnit.id"
+              :unit-lng="selectedUnit.lng"
+              :unit-lat="selectedUnit.lat"
+            />
+            <PipeGroundPotentialForm
+              v-else-if="it.code === 'PIPE_GROUND_POTENTIAL'"
+              :unit-id="selectedUnit.id"
+              :inlets="selectedUnitInlets"
+            />
+            <InspectionForm v-else :unit-id="selectedUnit.id" :item="store.items[idx]" />
           </el-tab-pane>
         </el-tabs>
       </div>

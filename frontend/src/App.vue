@@ -1,13 +1,32 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCpStore } from '@/stores/cp'
+import { applyTheme, getSavedTheme, type ThemeMode } from '@/utils/theme'
 
 const router = useRouter()
 const store = useCpStore()
+const appearanceRef = ref<HTMLElement | null>(null)
+const appearanceOpen = ref(false)
+const theme = ref<ThemeMode>(getSavedTheme())
+
+function selectTheme(next: ThemeMode) {
+  theme.value = next
+  applyTheme(next)
+  appearanceOpen.value = false
+}
+
+function closeAppearanceOnOutsideClick(event: MouseEvent) {
+  if (!appearanceRef.value?.contains(event.target as Node)) appearanceOpen.value = false
+}
 
 onMounted(async () => {
+  document.addEventListener('click', closeAppearanceOnOutsideClick)
   await store.loadAll()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeAppearanceOnOutsideClick)
 })
 </script>
 
@@ -30,6 +49,36 @@ onMounted(async () => {
     </div>
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'manage' }" @click="router.push('/manage')">
       数据管理
+    </div>
+    <div ref="appearanceRef" class="appearance-control">
+      <button
+        type="button"
+        class="appearance-trigger"
+        :class="{ active: appearanceOpen }"
+        :aria-expanded="appearanceOpen"
+        aria-haspopup="menu"
+        @click.stop="appearanceOpen = !appearanceOpen"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3a9 9 0 1 0 9 9c0-.7-.08-1.38-.23-2.03A7 7 0 0 1 12 3Z"/>
+        </svg>
+        <span>外观</span>
+        <span class="appearance-caret">▾</span>
+      </button>
+      <Transition name="appearance-pop">
+        <div v-if="appearanceOpen" class="appearance-menu" role="menu">
+          <button type="button" :class="{ selected: theme === 'light' }" role="menuitemradio" :aria-checked="theme === 'light'" @click="selectTheme('light')">
+            <span class="appearance-option-icon is-light">☀</span>
+            <span class="appearance-option-copy"><strong>浅色模式</strong><small>明亮、清晰的默认外观</small></span>
+            <span v-if="theme === 'light'" class="appearance-check">✓</span>
+          </button>
+          <button type="button" :class="{ selected: theme === 'dark' }" role="menuitemradio" :aria-checked="theme === 'dark'" @click="selectTheme('dark')">
+            <span class="appearance-option-icon is-dark">☾</span>
+            <span class="appearance-option-copy"><strong>深色模式</strong><small>低亮度的深蓝夜间外观</small></span>
+            <span v-if="theme === 'dark'" class="appearance-check">✓</span>
+          </button>
+        </div>
+      </Transition>
     </div>
   </div>
   <router-view v-slot="{ Component }">

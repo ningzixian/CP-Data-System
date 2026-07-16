@@ -69,6 +69,14 @@ let selectedBoxId: string | null = null
 let boxDeleteEnableSequence = 0
 type SelectableFacilityKind = 'pipe' | 'joint' | 'regulator' | 'inlet'
 let selectedFacility: { kind: SelectableFacilityKind; overlay: any; element?: HTMLElement } | null = null
+
+function currentMapStyle() {
+  return document.documentElement.classList.contains('dark') ? 'amap://styles/darkblue' : 'amap://styles/normal'
+}
+
+function handleThemeChange() {
+  map?.setMapStyle?.(currentMapStyle())
+}
 let suppressNextMapClear = false
 
 let connectPendingFrom: SurveyEndpointId | null = null
@@ -1315,7 +1323,7 @@ onMounted(async () => {
   if (!mapRef.value) return
   try {
     AMapApi = await loadAMap()
-    map = new AMapApi.Map(mapRef.value, { viewMode: '2D', zoom: 18, zooms: [3, 20], center: [116.497, 39.763], resizeEnable: true, animateEnable: true, jogEnable: false })
+    map = new AMapApi.Map(mapRef.value, { viewMode: '2D', mapStyle: currentMapStyle(), zoom: 18, zooms: [3, 20], center: [116.497, 39.763], resizeEnable: true, animateEnable: true, jogEnable: false })
     tipWindow = new AMapApi.InfoWindow({ isCustom: true, offset: new AMapApi.Pixel(0, -10), autoMove: false })
     menuWindow = new AMapApi.InfoWindow({ isCustom: false, offset: new AMapApi.Pixel(0, -8), closeWhenClickMap: false })
     map.on('click', handleMapClick)
@@ -1328,6 +1336,7 @@ onMounted(async () => {
     mapRef.value?.addEventListener('click', onMapClickCapture, true)
     document.addEventListener('click', onDocumentClick)
     window.addEventListener('blur', restoreMapDrag)
+    window.addEventListener('themechange', handleThemeChange)
     renderUnits()
     renderPipes()
     renderJoints()
@@ -1385,6 +1394,7 @@ onBeforeUnmount(() => {
   mapRef.value?.removeEventListener('click', onMapClickCapture, true)
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('blur', restoreMapDrag)
+  window.removeEventListener('themechange', handleThemeChange)
   map?.off('click', handleMapClick)
   map?.off('mousemove', handleMouseMove)
   map?.off('zoomend', renderSurveyLines)

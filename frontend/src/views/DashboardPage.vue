@@ -23,8 +23,15 @@ function renderChart() {
     itemStyle: { opacity: 0.6 },
   }))
 
+  const dark = document.documentElement.classList.contains('dark')
+  const textColor = dark ? '#cbd5e1' : '#606266'
+  const splitLineColor = dark ? '#334155' : '#e4e7ed'
   chart.setOption({
+    backgroundColor: 'transparent',
     tooltip: {
+      backgroundColor: dark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.96)',
+      borderColor: dark ? '#334155' : '#e4e7ed',
+      textStyle: { color: dark ? '#e5edf7' : '#303133' },
       trigger: 'item',
       formatter: (params: any) => {
         const row = store.dashboard?.rows.find((r) => r.unit_name === params.name)
@@ -33,12 +40,14 @@ function renderChart() {
         return `<b>${row.unit_name}</b><br/>完成 ${passed} / ${row.items.length} 项 (${Math.round(row.progress * 100)}%)`
       },
     },
-    legend: { bottom: 0, type: 'scroll' },
+    legend: { bottom: 0, type: 'scroll', textStyle: { color: textColor }, pageTextStyle: { color: textColor } },
     radar: {
       indicator: indicators,
       radius: '65%',
-      splitArea: { areaStyle: { color: ['rgba(64,158,255,0.02)', 'rgba(64,158,255,0.05)'] } },
-      axisName: { color: '#606266', fontSize: 11 },
+      splitArea: { areaStyle: { color: dark ? ['rgba(30, 64, 175, 0.08)', 'rgba(30, 64, 175, 0.16)'] : ['rgba(64,158,255,0.02)', 'rgba(64,158,255,0.05)'] } },
+      splitLine: { lineStyle: { color: splitLineColor } },
+      axisLine: { lineStyle: { color: splitLineColor } },
+      axisName: { color: textColor, fontSize: 11 },
     },
     series: [
       {
@@ -55,14 +64,20 @@ function handleResize() {
   chart?.resize()
 }
 
+function handleThemeChange() {
+  renderChart()
+}
+
 onMounted(async () => {
   await nextTick()
   renderChart()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('themechange', handleThemeChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('themechange', handleThemeChange)
   chart?.dispose()
   chart = null
 })
