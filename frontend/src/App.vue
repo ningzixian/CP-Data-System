@@ -31,6 +31,9 @@ onMounted(async () => {
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'manage' }" @click="router.push('/manage')">
       数据管理
     </div>
+    <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'zhiwen' }" @click="router.push('/zhiwen')">
+      🧠 智问
+    </div>
   </div>
   <router-view v-slot="{ Component }">
     <transition name="fade" mode="out-in">
