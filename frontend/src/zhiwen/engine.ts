@@ -130,6 +130,10 @@ export interface QueryResult {
   mapHighlight?: string
   /** 地图额外叠加层（用于非空间数据集时的设施展示） */
   mapOverlay?: Array<{ lng: number; lat: number; type: string; name: string; community: string; status?: string }>
+  /** 报告（当 isReport=true 时，由 ZhiwenPage 渲染 ReportPreview） */
+  isReport?: boolean
+  report?: any  // Report 类型（避免循环依赖）
+  reportOptions?: { community?: string; itemCode?: string }
   sql: string                          // 中间表示（给用户看"我理解成什么了"）
   totalCount?: number
 }
@@ -630,12 +634,106 @@ units 可用: inspection_status, community
   return { system, user }
 }
 
+// ============== 报告请求解析 ==============
+
+import { generateReport, REPORT_TYPES, ITEM_CODES, type ReportType, type ReportOptions, type Report } from './reportGenerator'
+
+export interface ReportRequest {
+  type: ReportType
+  options: ReportOptions
+  confidence: number
+}
+
+const REPORT_TYPE_ALIAS: Array<{ keywords: RegExp; type: ReportType }> = [
+  { keywords: /综合概览|总览|概览|综合报告|整体|汇总/, type: 'overview' },
+  { keywords: /异常报告|异常检测|异常明细|不合格|不通过/, type: 'exception' },
+  { keywords: /物探|拓扑|TQ_LINE|TQ_POINT|建设年代|权属分布/, type: 'topology' },
+  { keywords: /设施分布|设施报告|调压箱分布|引入口分布|接头分布/, type: 'facility' },
+  { keywords: /进度报告|进度分析|完成率|完成情况|进度情况/, type: 'progress' },
+]
+
+const ITEM_CODE_ALIAS: Record<string, string> = {
+  '管地电位': 'PIPE_GROUND_POTENTIAL',
+  '土壤电阻率': 'SOIL_RESISTIVITY',
+  '杂散电流': 'DC_STRAY_CURRENT',
+  '防腐层': 'COATING_DETECT',
+  '涂层': 'COATING_DETECT',
+  '绝缘接头': 'JOINT_VERIFY',
+  '绝缘电阻': 'JOINT_VERIFY',
+  '电联通': 'ELECTRIC_CONTINUITY',
+  '联通性': 'ELECTRIC_CONTINUITY',
+  '引入口参数': 'INLET_PARAM',
+}
+
+const ITEM_CODE_REVERSE: Record<string, string> = Object.fromEntries(
+  Object.entries(ITEM_CODE_ALIAS).map(([k, v]) => [v, k]),
+)
+
+/** 识别自然语言里的"报告请求" */
+export function parseReportRequest(text: string, _data: ZhiwenData): ReportRequest | null {
+  // 0. 必须有"报告"或"概览/总览"等关键词
+  const hasReport = /报告/.test(text)
+  const hasOverview = /综合概览|总览|概览|整体|汇总|总结/.test(text)
+  if (!hasReport && !hasOverview) return null
+
+  // 1. 报告类型识别
+  let type: ReportType | null = null
+  for (const { keywords, type: t } of REPORT_TYPE_ALIAS) {
+    if (keywords.test(text)) { type = t; break }
+  }
+
+  // 2. 专项检测：含"检测项名"且不是其他类型的关键词
+  if (!type) {
+    const itemMatch = text.match(/(管地电位|土壤电阻率|杂散电流|防腐层|涂层|绝缘接头|绝缘电阻|电联通|联通性|引入口参数)/)
+    if (itemMatch) type = 'inspection'
+  }
+
+  // 3. 兜底：有"报告"或"概览"但没明确类型 → 综合概览
+  if (!type) type = 'overview'
+
+  // 4. 参数提取
+  const community = matchCommunity(text) || '全部'
+  const options: ReportOptions = { community }
+
+  if (type === 'inspection') {
+    const itemMatch = text.match(/(管地电位|土壤电阻率|杂散电流|防腐层|涂层|绝缘接头|绝缘电阻|电联通|联通性|引入口参数)/)
+    if (itemMatch) {
+      options.itemCode = ITEM_CODE_ALIAS[itemMatch[1]] || 'PIPE_GROUND_POTENTIAL'
+    } else {
+      options.itemCode = 'PIPE_GROUND_POTENTIAL'
+    }
+  }
+
+  return { type, options, confidence: 0.9 }
+}
+
+/** 用户说"重新生成" / "再生成" / "重做" 时的处理 */
+export function isRegenerateIntent(text: string): boolean {
+  return /^(重新生成|再生成|重做|再来一次|重生成|重做一次|重新做|regenerate|again)$/i.test(text.trim())
+}
+
 export function runQuery(text: string, data: ZhiwenData): QueryResult {
   const q = text.trim()
   if (!q || q.length < 2) {
     return {
       text: '请输入您想问的问题，例如：七里DN100以上管线总长',
       sql: '',
+      mapDataset: 'pipes',
+      mapFocus: 'all',
+    }
+  }
+
+  // 报告请求：直接生成报告
+  const reportReq = parseReportRequest(q, data)
+  if (reportReq) {
+    const report: Report = generateReport(reportReq.type, data, reportReq.options)
+    const typeInfo = REPORT_TYPES.find((r) => r.type === reportReq.type)
+    return {
+      text: `✅ 已为您生成【${typeInfo?.title}】\n\n${report.sections[0]?.data || ''}\n\n💡 如需调整小区/检测项/重新生成，请使用下方按钮。`,
+      isReport: true,
+      report,
+      reportOptions: reportReq.options,
+      sql: `报告类型: ${typeInfo?.title}\n数据范围: ${reportReq.options.community}${reportReq.options.itemCode ? `\n检测项: ${ITEM_CODE_REVERSE[reportReq.options.itemCode] || reportReq.options.itemCode}` : ''}\n章节数: ${report.sections.length}`,
       mapDataset: 'pipes',
       mapFocus: 'all',
     }

@@ -13,8 +13,13 @@ import { useCpStore } from '@/stores/cp'
 import { loadZhiwenNetworkData, projectCpData } from '@/zhiwen/dataLoader'
 import {
   runQuery, scoreConfidence, PRESET_QUERIES, buildLLMPrompt, planToText, planToSql,
+  parseReportRequest, isRegenerateIntent,
   type ZhiwenData, type QueryResult, type ChartSpec, type LLMQueryPlan,
 } from '@/zhiwen/engine'
+import {
+  generateReport, REPORT_TYPES, ITEM_CODES,
+  type Report, type ReportOptions,
+} from '@/zhiwen/reportGenerator'
 import { generateSuggestions, getSuggestionColor, type Suggestion } from '@/zhiwen/suggestions'
 import {
   loadLLMConfig, saveLLMConfig, callLLM, pingLLM,
@@ -22,6 +27,8 @@ import {
 } from '@/zhiwen/llm'
 import { exportQueryResult, buildFileName, formatBytes, type ExportFormat } from '@/zhiwen/exporter'
 import ReportCenter from './ReportCenter.vue'
+import ReportPreview from './ReportPreview.vue'
+import type { Report as ReportTypeAlias } from '@/zhiwen/reportGenerator'
 
 const store = useCpStore()
 
@@ -77,6 +84,16 @@ const exportForm = reactive<{
 })
 const exportLastResult = ref<{ fileName: string; sizeBytes: number } | null>(null)
 
+// 报告调参 dialog
+const reportParamsOpen = ref(false)
+const reportParamsForm = reactive<{
+  community: string
+  itemCode: string
+}>({
+  community: '全部',
+  itemCode: 'PIPE_GROUND_POTENTIAL',
+})
+
 // ============== 加载数据 ==============
 async function loadData() {
   dataLoading.value = true
@@ -130,6 +147,13 @@ async function ask(q?: string) {
   }
   loading.value = true
   lastMethod.value = null
+
+  // 0) 报告快捷意图：用户说"重新生成"且当前有报告 → 用原参数再生成
+  if (isRegenerateIntent(text) && result.value?.isReport) {
+    regenerateReport(result.value.reportOptions || { community: result.value.report?.community })
+    loading.value = false
+    return
+  }
 
   try {
     // 1) 评估规则引擎置信度
@@ -291,6 +315,54 @@ function downloadAgain() {
   if (!exportLastResult.value) return
   // 直接重跑一遍导出（浏览器不会重复弹下载）
   doExport()
+}
+
+// ============== 报告处理 ==============
+
+/** 重新生成报告（用同参数） */
+function regenerateReport(options: ReportOptions) {
+  if (!result.value?.report) return
+  const r = result.value.report as Report
+  const newReport = generateReport(r.type, data.value, options)
+  result.value = {
+    ...result.value,
+    report: newReport,
+    reportOptions: options,
+    text: `✅ 已为您重新生成【${REPORT_TYPES.find((t) => t.type === r.type)?.title}】`,
+    sql: `报告类型: ${REPORT_TYPES.find((t) => t.type === r.type)?.title}\n数据范围: ${options.community}${options.itemCode ? `\n检测项: ${ITEM_CODES.find((c) => c.code === options.itemCode)?.name || options.itemCode}` : ''}\n章节数: ${newReport.sections.length}`,
+  }
+  history.value.unshift({
+    q: history.value[0]?.q || '报告生成',
+    r: result.value,
+    at: Date.now(),
+  })
+  ElMessage.success('已重新生成')
+}
+
+/** 打开调参 dialog */
+function openReportParams() {
+  if (!result.value?.report) return
+  const r = result.value.report as Report
+  reportParamsForm.community = r.community
+  if (r.itemCode) reportParamsForm.itemCode = r.itemCode
+  reportParamsOpen.value = true
+}
+
+/** 提交新参数重新生成 */
+function submitReportParams() {
+  if (!result.value?.report) return
+  regenerateReport({
+    community: reportParamsForm.community,
+    itemCode: reportParamsForm.itemCode,
+  })
+  reportParamsOpen.value = false
+}
+
+/** 关闭报告 */
+function closeReport() {
+  result.value = null
+  chart?.clear()
+  clearMap()
 }
 
 function usePreset(p: { label: string; query: string }) {
@@ -891,6 +963,7 @@ function renderText(text: string) {
             <span v-html="renderText(result.text)" />
             <div class="zw-answer-actions">
               <el-tag v-if="lastMethod === 'llm'" size="small" type="warning" effect="dark">LLM 兜底</el-tag>
+              <el-tag v-else-if="result.isReport" size="small" type="primary" effect="dark">📄 报告</el-tag>
               <el-tag v-else size="small" type="success" effect="dark">规则引擎</el-tag>
               <el-button
                 v-if="result.table"
@@ -904,6 +977,17 @@ function renderText(text: string) {
               </el-button>
             </div>
           </div>
+
+          <!-- 报告（嵌入式 A4 排版） -->
+          <ReportPreview
+            v-if="result.isReport && result.report"
+            :report="result.report"
+            title-prefix="智问："
+            :editable="true"
+            @regenerate="regenerateReport"
+            @update-params="openReportParams"
+            @close="closeReport"
+          />
 
           <div v-if="result.table" class="zw-card zw-table-card">
             <div class="zw-card-title">
@@ -958,6 +1042,37 @@ function renderText(text: string) {
 
     <!-- 报告中心 tab -->
     <ReportCenter v-if="activeTab === 'report'" :data="data" />
+
+    <!-- 报告调参 dialog -->
+    <el-dialog v-model="reportParamsOpen" title="⚙ 调整报告参数" width="500px">
+      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+        调整参数后会自动重新生成报告。
+      </el-alert>
+      <el-form :model="reportParamsForm" label-width="100px">
+        <el-form-item label="数据范围">
+          <el-radio-group v-model="reportParamsForm.community">
+            <el-radio-button label="全部">全部小区</el-radio-button>
+            <el-radio-button label="南海家园七里">七里</el-radio-button>
+            <el-radio-button label="南海家园三里">三里</el-radio-button>
+            <el-radio-button label="南海家园六里">六里</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="result?.report?.type === 'inspection'" label="检测项">
+          <el-select v-model="reportParamsForm.itemCode" style="width: 100%">
+            <el-option
+              v-for="item in ITEM_CODES"
+              :key="item.code"
+              :label="item.name"
+              :value="item.code"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reportParamsOpen = false">取消</el-button>
+        <el-button type="primary" @click="submitReportParams">重新生成</el-button>
+      </template>
+    </el-dialog>
 
     <!-- LLM 设置弹窗 -->
     <el-dialog v-model="settingsOpen" title="⚙ LLM 兜底设置" width="560px" :close-on-click-modal="false">
