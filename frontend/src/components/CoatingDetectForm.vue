@@ -129,12 +129,15 @@ async function save() {
   if (saving.value) return
   saving.value = true
   try {
+    const status: RecordStatus = metadata.status === 'passed' || metadata.status === 'exception'
+      ? metadata.status
+      : 'pending'
     const payload: InspectionRecordInput = {
       unit_id: props.unitId,
       item_code: 'COATING_DETECT',
       inspector: metadata.inspector,
       inspection_date: metadata.inspection_date,
-      status: metadata.status,
+      status,
       result_summary: metadata.result_summary || `共记录 ${points.value.length} 处防腐层破损点`,
       result_data: {
         method: '皮尔逊法',
@@ -259,7 +262,7 @@ onBeforeUnmount(() => { loadSequence++; revokePhotoViews() })
     </el-collapse>
 
     <el-form label-width="92px" class="coating-result-form">
-      <el-form-item label="检测状态"><el-radio-group v-model="metadata.status"><el-radio-button value="pending">待开始</el-radio-button><el-radio-button value="passed">合格</el-radio-button><el-radio-button value="exception">异常</el-radio-button></el-radio-group></el-form-item>
+      <el-form-item label="检测状态"><el-radio-group v-model="metadata.status"><el-radio-button label="pending">待开始</el-radio-button><el-radio-button label="passed">合格</el-radio-button><el-radio-button label="exception">异常</el-radio-button></el-radio-group></el-form-item>
       <el-form-item label="结果摘要"><el-input v-model="metadata.result_summary" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="备注"><el-input v-model="metadata.note" type="textarea" :rows="2" /></el-form-item>
       <el-form-item><el-button type="primary" :loading="saving" :disabled="loading" @click="save">保存防腐层检测数据</el-button><span v-if="recordId" class="insulation-record-id">记录 #{{ recordId }}</span></el-form-item>

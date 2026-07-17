@@ -1922,6 +1922,7 @@ html.dark {
 }
 
 .unit-data-module {
+  position: relative;
   min-width: 0;
   height: 76px;
   padding: 10px;
@@ -3026,6 +3027,62 @@ html.dark {
 .potential-map-marker.is-pending .potential-map-pin::before { background:#7aa6b9; }
 .potential-map-marker.is-pending .potential-map-pin span { border-color:#8fb8c9; background:#f5fafc; color:#60808d; }
 
+/* ==================== 管道电联通性数据模块 ==================== */
+.continuity-map-toolbar .insulation-map-toolbar-icon { border-color:#4ade80; background:#dcfce7; color:#15803d; font-size:23px; }
+.continuity-map-toolbar button { border-color:#16a34a; background:#16a34a; }
+.continuity-map-marker { width:246px; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; filter:drop-shadow(0 7px 18px rgba(21,128,61,.24)); transition:transform .18s ease,filter .18s ease; transform-origin:bottom center; }
+.continuity-map-marker:hover { transform:translateY(-3px) scale(1.025); filter:drop-shadow(0 12px 26px rgba(21,128,61,.4)); }
+.continuity-map-marker.is-pending { width:158px; opacity:.9; }
+.continuity-map-card { overflow:hidden; border:1px solid #86efac; border-radius:11px; background:rgba(255,255,255,.98); }
+.continuity-map-card header { height:35px; padding:0 10px; display:flex; align-items:center; gap:7px; border-bottom:1px solid #d5f5df; background:#f0fdf4; }
+.continuity-map-card header span { color:#639276; font-size:9px; }
+.continuity-map-card header strong { min-width:0; overflow:hidden; color:#166534; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.continuity-map-card header i { margin-left:auto; padding:2px 7px; border-radius:999px; background:#dcfce7; color:#15803d; font-size:9px; font-style:normal; white-space:nowrap; }
+.continuity-map-marker.is-connected .continuity-map-card header i { background:#fee2e2; color:#dc2626; }
+.continuity-map-primary { margin:8px 10px 5px; padding:8px 10px; display:flex; align-items:flex-end; justify-content:space-between; border-radius:8px; background:linear-gradient(135deg,#dcfce7,#f0fdf4); }
+.continuity-map-primary span { color:#638b72; font-size:10px; }
+.continuity-map-primary b { color:#15803d; font-size:20px; line-height:1; }
+.continuity-map-values { padding:2px 10px 5px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; }
+.continuity-map-values > div { min-width:0; display:flex; justify-content:space-between; gap:5px; border-bottom:1px dashed #d4eadb; color:#789184; font-size:9px; line-height:18px; }
+.continuity-map-values b { overflow:hidden; color:#3f5f4a; text-overflow:ellipsis; white-space:nowrap; }
+.continuity-map-coords { color:#86a590; font-family:Consolas,monospace; font-size:9px; text-align:center; }
+.continuity-map-note { margin:5px 10px 7px; padding:5px 7px; border-radius:5px; background:#f7fcf8; color:#718b78; font-size:9px; line-height:1.4; }
+.continuity-map-photos { margin:6px 10px 9px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; }
+.continuity-map-photos a { height:42px; overflow:hidden; display:block; border-radius:5px; background:#dcfce7; }
+.continuity-map-photos img { width:100%; height:100%; display:block; object-fit:cover; transition:transform .18s ease; }
+.continuity-map-photos a:hover img { transform:scale(1.12); }
+.continuity-map-photo-empty { margin:6px 10px 9px; padding:6px; border:1px dashed #9cdeb2; border-radius:6px; background:#f7fdf9; color:#79a086; font-size:9px; text-align:center; }
+.continuity-map-pending { padding:7px 10px; display:flex; flex-direction:column; align-items:center; border:1px solid #9dcfaf; border-radius:8px; background:rgba(248,253,250,.96); }
+.continuity-map-pending strong { overflow:hidden; max-width:100%; color:#557b62; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.continuity-map-pending span { margin-top:2px; color:#91a99a; font-size:8px; }
+.continuity-map-pin { height:27px; display:flex; flex-direction:column; align-items:center; }
+.continuity-map-pin::before { content:''; width:2px; height:7px; background:#16a34a; }
+.continuity-map-pin span { width:27px; height:27px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:3px solid #4ade80; border-radius:50%; background:rgba(240,253,244,.98); color:#15803d; font-size:15px; font-weight:800; box-shadow:0 3px 8px rgba(21,128,61,.3); }
+.continuity-map-marker.is-connected .continuity-map-pin::before { background:#dc2626; }
+.continuity-map-marker.is-connected .continuity-map-pin span { border-color:#f87171; background:#fff1f2; color:#dc2626; }
+.continuity-map-marker.is-pending .continuity-map-pin::before { background:#7da88c; }
+.continuity-map-marker.is-pending .continuity-map-pin span { border-color:#8fbea0; background:#f5faf7; color:#60836c; }
+
+/* ==================== 引入口参数数据模块 ==================== */
+.inlet-parameter-map-toolbar .insulation-map-toolbar-icon { border-color:#e879f9; background:#fae8ff; color:#a21caf; font-size:22px; }
+.inlet-parameter-map-toolbar button { border-color:#c026d3; background:#c026d3; }
+.inlet-parameter-map-marker { width:252px; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; filter:drop-shadow(0 7px 18px rgba(162,28,175,.23)); transition:transform .18s ease,filter .18s ease; transform-origin:bottom center; }
+.inlet-parameter-map-marker:hover { transform:translateY(-3px) scale(1.025); filter:drop-shadow(0 12px 26px rgba(162,28,175,.38)); }
+.inlet-parameter-map-marker.is-pending { width:158px; opacity:.9; }
+.inlet-parameter-map-card { overflow:hidden; border:1px solid #e9a8f2; border-radius:11px; background:rgba(255,255,255,.98); }
+.inlet-parameter-map-card header { height:35px; padding:0 10px; display:flex; align-items:center; gap:7px; border-bottom:1px solid #f1d5f5; background:#fdf4ff; }
+.inlet-parameter-map-card header span { color:#95669b; font-size:9px; }.inlet-parameter-map-card header strong { min-width:0;overflow:hidden;color:#86198f;font-size:12px;text-overflow:ellipsis;white-space:nowrap; }.inlet-parameter-map-card header i { margin-left:auto;padding:2px 7px;border-radius:999px;background:#fae8ff;color:#a21caf;font-size:9px;font-style:normal; }
+.inlet-parameter-map-primary { margin:8px 10px 5px;padding:8px 10px;display:flex;align-items:flex-end;justify-content:space-between;border-radius:8px;background:linear-gradient(135deg,#fae8ff,#fdf4ff); }.inlet-parameter-map-primary span { color:#916397;font-size:10px; }.inlet-parameter-map-primary b { color:#a21caf;font-size:20px;line-height:1; }
+.inlet-parameter-map-readings { padding:2px 10px 5px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px; }.inlet-parameter-map-readings span { padding:4px;border-radius:4px;background:#fdf4ff;color:#9b74a0;font-size:8px;text-align:center; }.inlet-parameter-map-readings b { display:block;color:#76227e;font-size:9px; }
+.inlet-parameter-map-values { padding:2px 10px 5px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px; }.inlet-parameter-map-values > div { min-width:0;display:flex;justify-content:space-between;gap:5px;border-bottom:1px dashed #ead5ed;color:#937d96;font-size:9px;line-height:18px; }.inlet-parameter-map-values b { overflow:hidden;color:#624366;text-overflow:ellipsis;white-space:nowrap; }
+.inlet-parameter-map-note { margin:4px 10px 7px;padding:5px 7px;border-radius:5px;background:#fdf9fe;color:#88708b;font-size:9px;line-height:1.4; }.inlet-parameter-map-photos { margin:6px 10px 9px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px; }.inlet-parameter-map-photos a { height:42px;overflow:hidden;display:block;border-radius:5px;background:#fae8ff; }.inlet-parameter-map-photos img { width:100%;height:100%;display:block;object-fit:cover;transition:transform .18s ease; }.inlet-parameter-map-photos a:hover img { transform:scale(1.12); }.inlet-parameter-map-photo-empty { margin:6px 10px 9px;padding:6px;border:1px dashed #dfafe5;border-radius:6px;background:#fdf9fe;color:#9e7ca2;font-size:9px;text-align:center; }
+.inlet-parameter-map-pending { padding:7px 10px;display:flex;flex-direction:column;align-items:center;border:1px solid #caa3cf;border-radius:8px;background:rgba(253,249,254,.96); }.inlet-parameter-map-pending strong { overflow:hidden;max-width:100%;color:#7d5b82;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }.inlet-parameter-map-pending span { margin-top:2px;color:#a592a8;font-size:8px; }
+.inlet-parameter-map-pin { height:27px;display:flex;flex-direction:column;align-items:center; }.inlet-parameter-map-pin::before { content:'';width:2px;height:7px;background:#c026d3; }.inlet-parameter-map-pin span { width:27px;height:27px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:3px solid #e879f9;border-radius:50%;background:rgba(253,244,255,.98);color:#a21caf;font-size:14px;font-weight:800;box-shadow:0 3px 8px rgba(162,28,175,.3); }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin::before { background:#a28aa5; }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin span { border-color:#baa0be;background:#faf7fb;color:#826e85; }
+
+.unit-data-module-status { position:absolute; top:7px; right:8px; padding:1px 5px; border-radius:8px; background:#fee2e2; color:#dc2626; font-size:9px; font-weight:700; line-height:15px; }
+.unit-data-module.is-exception { border-color:rgba(239,68,68,.45); }
+html.dark .unit-data-module-status { background:#59272b; color:#fca5a5; }
+
 .dc-form-summary { border-color: #f0c5a8; background: linear-gradient(135deg, #fff7ed, #fffbf7); }
 .dc-form-summary strong, .dc-form .soil-point-heading strong, .dc-form .soil-point-fields h4 { color: #8f3514; }
 .dc-form-summary .soil-form-progress b, .dc-form .soil-point-index { color: #c2410c; }
@@ -3853,6 +3910,18 @@ html.dark .potential-map-values b { color:#c3dce6; }
 html.dark .potential-map-note,html.dark .potential-map-photo-empty,html.dark .potential-map-photos a { border-color:#2d6077; background:#102d3b; color:#85aeba; }
 html.dark .potential-map-pending { border-color:#37677a; background:rgba(18,43,54,.96); }
 html.dark .potential-map-pending strong { color:#b5d8e5; }
+html.dark .continuity-map-toolbar .insulation-map-toolbar-icon { border-color:#4ade80; background:#153d27; color:#86efac; }
+html.dark .continuity-map-card { border-color:#34734a; background:rgba(17,42,26,.98); }
+html.dark .continuity-map-card header { border-color:#2c5b3c; background:#173f28; }
+html.dark .continuity-map-card header strong,html.dark .continuity-map-primary b { color:#bbf7d0; }
+html.dark .continuity-map-primary { background:linear-gradient(135deg,#173f28,#122f20); }
+html.dark .continuity-map-values > div { border-color:#2d5139; }
+html.dark .continuity-map-values b { color:#c7e3d0; }
+html.dark .continuity-map-note,html.dark .continuity-map-photo-empty,html.dark .continuity-map-photos a { border-color:#346d49; background:#12331f; color:#88af94; }
+html.dark .continuity-map-pending { border-color:#3b704c; background:rgba(18,47,31,.96); }
+html.dark .continuity-map-pending strong { color:#b9dec5; }
+html.dark .inlet-parameter-map-toolbar .insulation-map-toolbar-icon { border-color:#e879f9;background:#44204b;color:#f0abfc; }
+html.dark .inlet-parameter-map-card { border-color:#74407c;background:rgba(43,21,47,.98); }.dark .inlet-parameter-map-card header { border-color:#63356a;background:#48204e; }.dark .inlet-parameter-map-card header strong,.dark .inlet-parameter-map-primary b { color:#f5d0fe; }.dark .inlet-parameter-map-primary { background:linear-gradient(135deg,#48204e,#35183a); }.dark .inlet-parameter-map-readings span,.dark .inlet-parameter-map-note,.dark .inlet-parameter-map-photo-empty,.dark .inlet-parameter-map-photos a { border-color:#68406e;background:#35183a;color:#b797bb; }.dark .inlet-parameter-map-values > div { border-color:#58385c; }.dark .inlet-parameter-map-values b,.dark .inlet-parameter-map-readings b { color:#ecc7f1; }.dark .inlet-parameter-map-pending { border-color:#704878;background:rgba(52,27,56,.96); }.dark .inlet-parameter-map-pending strong { color:#dec4e1; }
 
 @media (max-width: 1200px) {
   .insulation-inlet-editor {

@@ -10,12 +10,17 @@ import SoilResistivityForm from '@/components/SoilResistivityForm.vue'
 import DcStrayCurrentForm from '@/components/DcStrayCurrentForm.vue'
 import CoatingDetectForm from '@/components/CoatingDetectForm.vue'
 import PipeGroundPotentialForm from '@/components/PipeGroundPotentialForm.vue'
+import ElectricContinuityForm from '@/components/ElectricContinuityForm.vue'
+import InletParameterForm from '@/components/InletParameterForm.vue'
 import UnitInfoCard from '@/components/UnitInfoCard.vue'
 import UnitDataModules from '@/components/UnitDataModules.vue'
 import { soilResistivityPoints } from '@/utils/soilResistivity'
 import { dcStrayCurrentPoints } from '@/utils/dcStrayCurrent'
 import { coatingDamagePoints } from '@/utils/coatingDetect'
 import { inletPotentialReadings, hasNaturalPotential } from '@/utils/pipeGroundPotential'
+import { electricContinuityPoints } from '@/utils/electricContinuity'
+import { hasInletParameterResult, inletParameterReadings } from '@/utils/inletParameters'
+import { COMMUNITY_ORDER, averageCommunityProgress, communityOfUnit } from '@/utils/community'
 import type { CorrosionUnit, InspectionItemCode } from '@/types/models'
 
 const store = useCpStore()
@@ -51,29 +56,6 @@ const unitCardVisible = computed(() =>
  *  - 决定 communities 计算的展示顺序与“占位”位置
  *  - 之后新增小区名：把名字按希望的位置插进这份清单即可
  */
-const COMMUNITY_ORDER = [
-  '南海家园七里',
-  '南海家园六里', '南海家园五里', '南海家园四里', '南海家园三里', '南海家园二里', '南海家园一里',
-  '亦庄金茂悦北区', '亦庄金茂悦南区',
-  '金茂逸墅', '金域东郡',
-  '观海苑', '棠颂璟庐',
-  '鹿海园一里', '鹿海园三里', '鹿海园四里', '鹿海园五里',
-  '泰河园一里', '泰河园一里二区', '泰河园三里', '泰河园四里一区', '泰河园四里二区', '泰河园七里',
-  '悦廷', '亦园', '北京中芯花园', '亦城茗苑',
-]
-
-/** 从 unit.address 解析出小区名
- *  - facilities.ts 写入的格式是 "南海家园七里 · 单元 X"
- *  - 用 " · " 分隔符切第一段
- *  - 解析不出来时归到「未分类」兜底桶
- */
-function communityOf(unit: CorrosionUnit): string {
-  const addr = unit.address
-  if (!addr) return '未分类'
-  const idx = addr.indexOf(' · ')
-  return idx > 0 ? addr.slice(0, idx) : '未分类'
-}
-
 /** 小区列表（按 address 前缀动态分组）
  *  - 先把 store.units 按 communityOf 分桶
  *  - 再按 COMMUNITY_ORDER 顺序拼装：有数据接 units，没数据用 emptyCommunity 占位
@@ -85,7 +67,7 @@ const communities = computed(() => {
   // 1. 按小区名分桶
   const buckets = new Map<string, CorrosionUnit[]>()
   for (const u of store.units) {
-    const c = communityOf(u)
+    const c = communityOfUnit(u)
     let arr = buckets.get(c)
     if (!arr) {
       arr = []
@@ -102,7 +84,7 @@ const communities = computed(() => {
     return {
       name,
       units,
-      avgProgress: avgProgress(units),
+      avgProgress: averageCommunityProgress(units),
       hasException: units.some((u) => u.inspection_status === 'exception'),
     }
   })
@@ -113,18 +95,13 @@ const communities = computed(() => {
     result.push({
       name,
       units,
-      avgProgress: avgProgress(units),
+      avgProgress: averageCommunityProgress(units),
       hasException: units.some((u) => u.inspection_status === 'exception'),
     })
   }
 
   return result
 })
-
-function avgProgress(units: CorrosionUnit[]) {
-  if (units.length === 0) return 0
-  return units.reduce((s, u) => s + (u.inspection_progress || 0), 0) / units.length
-}
 
 /** 小区进度条自定义颜色（按平均进度分档）
  *  - 100%  → 绿 #67c23a
@@ -239,7 +216,7 @@ watch(() => store.selectedUnit?.id, (newId, oldId) => {
   const unit = store.selectedUnit
   if (!unit) return
   // 1) 展开对应小区（accordion 单选,直接赋值切换）
-  const communityName = communityOf(unit)
+  const communityName = communityOfUnit(unit)
   if (communityName !== '未分类' && communityActive.value !== communityName) {
     communityActive.value = communityName
   }
@@ -291,7 +268,7 @@ function returnToUnitCard() {
 
 /** 数据模块点击预留接口：后续可按检测项目编码打开对应的数据视图。 */
 function onDataModuleSelect(code: InspectionItemCode) {
-  activeDataModule.value = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' ? code : null
+  activeDataModule.value = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' || code === 'ELECTRIC_CONTINUITY' || code === 'INLET_PARAM' ? code : null
 }
 
 function clearActiveDataModule() {
@@ -325,6 +302,18 @@ function openCoatingEditor() {
 function openPipePotentialEditor() {
   if (!store.selectedUnit) return
   activeTab.value = 'PIPE_GROUND_POTENTIAL'
+  drawerOpen.value = true
+}
+
+function openElectricContinuityEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'ELECTRIC_CONTINUITY'
+  drawerOpen.value = true
+}
+
+function openInletParameterEditor() {
+  if (!store.selectedUnit) return
+  activeTab.value = 'INLET_PARAM'
   drawerOpen.value = true
 }
 
@@ -465,6 +454,24 @@ const selectedUnitPotentialCompleted = computed(() => {
   return [...inletPotentialReadings(record).values()].filter(hasNaturalPotential).length
 })
 
+const selectedUnitContinuityPoints = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return []
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'ELECTRIC_CONTINUITY')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return electricContinuityPoints(record)
+})
+
+const selectedUnitInletParameterCompleted = computed(() => {
+  const unitId = selectedUnit.value?.id
+  if (!unitId) return 0
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'INLET_PARAM')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return [...inletParameterReadings(record).values()].filter(hasInletParameterResult).length
+})
+
 function unitCenterText(unit: CorrosionUnit): string {
   return unit.lng !== undefined && unit.lat !== undefined
     ? `${unit.lng.toFixed(6)}, ${unit.lat.toFixed(6)}`
@@ -582,6 +589,20 @@ const tabItems = computed(() =>
           <button type="button" @click="openPipePotentialEditor">编辑自然电位</button>
         </div>
       </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'ELECTRIC_CONTINUITY' && selectedUnit" class="insulation-map-toolbar continuity-map-toolbar">
+          <div class="insulation-map-toolbar-icon">↔</div>
+          <div><strong>管道电联通性展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitContinuityPoints.length }} 个测试位置</span></div>
+          <button type="button" @click="openElectricContinuityEditor">编辑电联通数据</button>
+        </div>
+      </Transition>
+      <Transition name="insulation-toolbar">
+        <div v-if="activeDataModule === 'INLET_PARAM' && selectedUnit" class="insulation-map-toolbar inlet-parameter-map-toolbar">
+          <div class="insulation-map-toolbar-icon">Ø</div>
+          <div><strong>引入口参数展示</strong><span>{{ selectedUnit.name }} · {{ selectedUnitInletParameterCompleted }}/{{ selectedUnitInlets.length }} 个引入口已检测</span></div>
+          <button type="button" @click="openInletParameterEditor">编辑引入口参数</button>
+        </div>
+      </Transition>
       <div class="map-legend">
         <!-- 进度状态图例(只读,纯说明) -->
         <div class="legend-section legend-section--readonly">
@@ -637,7 +658,7 @@ const tabItems = computed(() =>
 
     <el-drawer
       v-model="drawerOpen"
-      :title="selectedUnit ? (activeDataModule === 'JOINT_VERIFY' ? `绝缘性能：${selectedUnit.name}` : activeDataModule === 'SOIL_RESISTIVITY' ? `土壤电阻率：${selectedUnit.name}` : activeDataModule === 'DC_STRAY_CURRENT' ? `直流杂散电流：${selectedUnit.name}` : activeDataModule === 'COATING_DETECT' ? `防腐层检测：${selectedUnit.name}` : activeDataModule === 'PIPE_GROUND_POTENTIAL' ? `管地腐蚀电位：${selectedUnit.name}` : `单元详情：${selectedUnit.name}`) : '单元详情'"
+      :title="selectedUnit ? (activeDataModule === 'JOINT_VERIFY' ? `绝缘性能：${selectedUnit.name}` : activeDataModule === 'SOIL_RESISTIVITY' ? `土壤电阻率：${selectedUnit.name}` : activeDataModule === 'DC_STRAY_CURRENT' ? `直流杂散电流：${selectedUnit.name}` : activeDataModule === 'COATING_DETECT' ? `防腐层检测：${selectedUnit.name}` : activeDataModule === 'PIPE_GROUND_POTENTIAL' ? `管地腐蚀电位：${selectedUnit.name}` : activeDataModule === 'ELECTRIC_CONTINUITY' ? `管道电联通性：${selectedUnit.name}` : activeDataModule === 'INLET_PARAM' ? `引入口参数：${selectedUnit.name}` : `单元详情：${selectedUnit.name}`) : '单元详情'"
       size="80%"
       direction="rtl"
       @closed="onDrawerClosed"
@@ -709,6 +730,17 @@ const tabItems = computed(() =>
             />
             <PipeGroundPotentialForm
               v-else-if="it.code === 'PIPE_GROUND_POTENTIAL'"
+              :unit-id="selectedUnit.id"
+              :inlets="selectedUnitInlets"
+            />
+            <ElectricContinuityForm
+              v-else-if="it.code === 'ELECTRIC_CONTINUITY'"
+              :unit-id="selectedUnit.id"
+              :unit-lng="selectedUnit.lng"
+              :unit-lat="selectedUnit.lat"
+            />
+            <InletParameterForm
+              v-else-if="it.code === 'INLET_PARAM'"
               :unit-id="selectedUnit.id"
               :inlets="selectedUnitInlets"
             />

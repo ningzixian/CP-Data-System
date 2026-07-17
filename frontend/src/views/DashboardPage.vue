@@ -1,12 +1,30 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import { useRouter } from 'vue-router'
 import { useCpStore } from '@/stores/cp'
 import StatusTag from '@/components/StatusTag.vue'
+import { communitiesFromUnits, communityOfUnit } from '@/utils/community'
+import type { InspectionItemCode } from '@/types/models'
 
 const store = useCpStore()
+const router = useRouter()
 const chartRef = ref<HTMLDivElement | null>(null)
+const selectedCommunity = ref('')
 let chart: echarts.ECharts | null = null
+
+const communityGroups = computed(() => communitiesFromUnits(store.units).filter((group) => group.units.length))
+const dashboardRows = computed(() => (store.dashboard?.rows ?? []).filter((row) => {
+  if (!selectedCommunity.value) return true
+  const unit = store.units.find((item) => item.id === row.unit_id)
+  return communityOfUnit(unit) === selectedCommunity.value
+}))
+const dashboardStats = computed(() => ({
+  total: dashboardRows.value.length,
+  completed: dashboardRows.value.filter((row) => row.status === 'completed').length,
+  in_progress: dashboardRows.value.filter((row) => row.status === 'in_progress').length,
+  exception: dashboardRows.value.filter((row) => row.status === 'exception').length,
+}))
 
 function renderChart() {
   if (!chartRef.value || !store.dashboard) return
@@ -17,7 +35,7 @@ function renderChart() {
     max: 1,
   }))
 
-  const seriesData = store.dashboard.rows.map((r) => ({
+  const seriesData = dashboardRows.value.map((r) => ({
     name: r.unit_name,
     value: r.items.map((it) => (it.status === 'passed' ? 1 : 0)),
     itemStyle: { opacity: 0.6 },
@@ -34,7 +52,7 @@ function renderChart() {
       textStyle: { color: dark ? '#e5edf7' : '#303133' },
       trigger: 'item',
       formatter: (params: any) => {
-        const row = store.dashboard?.rows.find((r) => r.unit_name === params.name)
+        const row = dashboardRows.value.find((r) => r.unit_name === params.name)
         if (!row) return ''
         const passed = row.items.filter((i) => i.status === 'passed').length
         return `<b>${row.unit_name}</b><br/>完成 ${passed} / ${row.items.length} 项 (${Math.round(row.progress * 100)}%)`
@@ -57,7 +75,7 @@ function renderChart() {
         lineStyle: { width: 2 },
       },
     ],
-  })
+  }, true)
 }
 
 function handleResize() {
@@ -83,6 +101,11 @@ onBeforeUnmount(() => {
 })
 
 watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
+watch(selectedCommunity, () => nextTick(renderChart))
+
+function openRecord(unitId: number, itemCode: InspectionItemCode) {
+  void router.push({ name: 'manage', query: { unit_id: String(unitId), item_code: itemCode } })
+}
 </script>
 
 <template>
@@ -91,7 +114,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
       <el-col :xs="12" :md="6">
         <el-card shadow="hover">
           <div style="text-align:center">
-            <div style="font-size:36px;color:#409eff;font-weight:600">{{ store.stats.total }}</div>
+            <div style="font-size:36px;color:#409eff;font-weight:600">{{ dashboardStats.total }}</div>
             <div style="color:#909399;margin-top:4px">腐控单元总数</div>
           </div>
         </el-card>
@@ -99,7 +122,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
       <el-col :xs="12" :md="6">
         <el-card shadow="hover">
           <div style="text-align:center">
-            <div style="font-size:36px;color:#67c23a;font-weight:600">{{ store.stats.completed }}</div>
+            <div style="font-size:36px;color:#67c23a;font-weight:600">{{ dashboardStats.completed }}</div>
             <div style="color:#909399;margin-top:4px">已完成</div>
           </div>
         </el-card>
@@ -107,7 +130,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
       <el-col :xs="12" :md="6">
         <el-card shadow="hover">
           <div style="text-align:center">
-            <div style="font-size:36px;color:#e6a23c;font-weight:600">{{ store.stats.in_progress }}</div>
+            <div style="font-size:36px;color:#e6a23c;font-weight:600">{{ dashboardStats.in_progress }}</div>
             <div style="color:#909399;margin-top:4px">进行中</div>
           </div>
         </el-card>
@@ -115,7 +138,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
       <el-col :xs="12" :md="6">
         <el-card shadow="hover">
           <div style="text-align:center">
-            <div style="font-size:36px;color:#f56c6c;font-weight:600">{{ store.stats.exception }}</div>
+            <div style="font-size:36px;color:#f56c6c;font-weight:600">{{ dashboardStats.exception }}</div>
             <div style="color:#909399;margin-top:4px">异常单元</div>
           </div>
         </el-card>
@@ -127,6 +150,9 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
         <div style="display:flex;align-items:center">
           <b style="font-size:15px">各腐控单元 7 项检测完成度（雷达图）</b>
           <div style="flex:1"></div>
+          <el-select v-model="selectedCommunity" clearable placeholder="全部小区" style="width:180px;margin-right:14px">
+            <el-option v-for="group in communityGroups" :key="group.name" :label="`${group.name}（${group.units.length}）`" :value="group.name" />
+          </el-select>
           <span style="font-size:12px;color:#909399">外环 = 已完成，内环 = 待开始</span>
         </div>
       </template>
@@ -137,7 +163,7 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
       <template #header>
         <b style="font-size:15px">详情矩阵（点击单元格可跳到录入）</b>
       </template>
-      <el-table :data="store.dashboard?.rows ?? []" stripe style="width:100%" border>
+      <el-table :data="dashboardRows" stripe style="width:100%" border>
         <el-table-column prop="unit_name" label="单元" width="120" fixed />
         <el-table-column
           v-for="it in store.dashboard?.items ?? []"
@@ -147,12 +173,11 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
           min-width="100"
         >
           <template #default="{ row }">
-            <el-tooltip :content="it.name" placement="top">
-              <StatusTag
-                :status="row.items.find((i: any) => i.code === it.code)?.status || 'pending'"
-                short
-              />
-            </el-tooltip>
+            <button class="dashboard-record-cell" type="button" :aria-label="`查看 ${row.unit_name} ${it.name}`" @click="openRecord(row.unit_id, it.code)">
+              <el-tooltip :content="`${it.name} · 点击前往数据管理`" placement="top">
+                <StatusTag :status="row.items.find((i: any) => i.code === it.code)?.status || 'pending'" short />
+              </el-tooltip>
+            </button>
           </template>
         </el-table-column>
         <el-table-column label="总进度" width="140" fixed="right">
@@ -164,3 +189,8 @@ watch(() => store.dashboard, () => nextTick(renderChart), { deep: true })
     </el-card>
   </div>
 </template>
+
+<style scoped>
+.dashboard-record-cell { width:100%; padding:5px; border:0; background:transparent; cursor:pointer; }
+.dashboard-record-cell:hover { border-radius:6px; background:color-mix(in srgb,var(--app-accent) 10%,transparent); }
+</style>

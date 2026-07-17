@@ -402,6 +402,8 @@ const sanLiCoatingDetectRecord: InspectionRecord = {
 // 三里 FSKZ755856 管地腐蚀电位演示数据。照片仅用于读取仪表数值，不随代码内置。
 // 最左侧引入口 N54R328A067 读数为 -0.6182 VDC，其余引入口由界面按设施数据补为空记录。
 const SAN_LI_LEFTMOST_INLET_ID = 426159
+const SAN_LI_WEST_SECOND_INLET_ID = 426158
+const SAN_LI_WEST_THIRD_INLET_ID = 426157
 const sanLiPipeGroundPotentialRecord: InspectionRecord = {
   id: 7561,
   unit_id: SAN_LI_FSKZ755856_UNIT_ID,
@@ -435,6 +437,125 @@ const sanLiPipeGroundPotentialRecord: InspectionRecord = {
   updated_at: '2026-01-07T09:48:00.000+08:00',
 }
 
+// 三里 FSKZ755856 管道电联通性演示数据。两处仪表照片分别显示 491.1 kΩ 和 129.5 kΩ。
+// 照片不随代码内置，用户可在电联通性抽屉中按测试位置上传并持久化保存。
+const sanLiElectricContinuityRecord: InspectionRecord = {
+  id: 7562,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'ELECTRIC_CONTINUITY',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'ELECTRIC_CONTINUITY')!.name,
+  work_hours: 0.5,
+  personnel_count: 2,
+  personnel_level: '中级',
+  inspector: '现场检测人员',
+  inspection_date: '2026-07-17T09:00:00.000+08:00',
+  status: 'passed',
+  result_summary: '完成电动车充电桩接地和楼房接地网两处测试，测得电阻 491.1 kΩ、129.5 kΩ，未发现电联通',
+  result_data: {
+    method: '电阻测量法',
+    point_count: 2,
+    completed_point_count: 2,
+    connected_count: 0,
+    is_connected: '未发现电联通',
+    average_resistance: 310.3,
+    test_points: [
+      {
+        id: 755856601,
+        name: '电动车充电桩接地',
+        target_type: '充电设施接地',
+        lng: 116.49764,
+        lat: 39.76343,
+        measured_resistance: 491.1,
+        resistance_unit: 'kΩ',
+        is_connected: false,
+        conclusion: '未联通',
+        note: '根据现场仪表照片读取 491.1 kΩ；照片由用户后续上传。',
+        photo_urls: [],
+      },
+      {
+        id: 755856602,
+        name: '楼房接地网',
+        target_type: '建筑接地网',
+        lng: 116.49738,
+        lat: 39.76356,
+        measured_resistance: 129.5,
+        resistance_unit: 'kΩ',
+        is_connected: false,
+        conclusion: '未联通',
+        note: '根据现场仪表照片读取 129.5 kΩ；照片由用户后续上传。',
+        photo_urls: [],
+      },
+    ],
+  },
+  measured_value: 310.3,
+  unit: 'kΩ',
+  note: '展示结论依据照片中的高阻值生成，正式检测结论应以现场记录和判定标准为准。',
+  created_at: '2026-07-17T09:00:00.000+08:00',
+  updated_at: '2026-07-17T09:00:00.000+08:00',
+}
+
+// 三里 FSKZ755856 西侧前三个引入口的单次外径测量数据。照片不随代码内置。
+const sanLiInletParameterRecord: InspectionRecord = {
+  id: 7563,
+  unit_id: SAN_LI_FSKZ755856_UNIT_ID,
+  item_code: 'INLET_PARAM',
+  item_name: INSPECTION_ITEMS.find((item) => item.code === 'INLET_PARAM')!.name,
+  work_hours: 0.25,
+  personnel_count: 1,
+  personnel_level: '中级',
+  inspector: '现场检测人员',
+  inspection_date: '2026-07-17T09:30:00.000+08:00',
+  status: 'pending',
+  result_summary: '已完成西侧前三个引入口的单次外径测量，代表性平均外径 60.2 mm，其余引入口待录入',
+  result_data: {
+    method: '数显游标卡尺单点测量法',
+    inlet_count: 28,
+    completed_inlet_count: 3,
+    diameter: 60.2,
+    average_diameter: 60.2,
+    inlets: [
+      {
+        inlet_id: SAN_LI_LEFTMOST_INLET_ID,
+        inlet_code: 'N54R328A067',
+        diameter_readings: [60.0],
+        average_diameter: 60.0,
+        diameter_difference: 0,
+        out_of_roundness: 0,
+        wall_thickness: null,
+        instrument: '数显游标卡尺',
+        note: '西侧第一个引入口；单次外径读数 60.0 mm。照片由用户后续上传。',
+      },
+      {
+        inlet_id: SAN_LI_WEST_SECOND_INLET_ID,
+        inlet_code: 'N54R328A068',
+        diameter_readings: [60.4],
+        average_diameter: 60.4,
+        diameter_difference: 0,
+        out_of_roundness: 0,
+        wall_thickness: null,
+        instrument: '数显游标卡尺',
+        note: '西侧第二个引入口；单次外径读数 60.4 mm。照片由用户后续上传。',
+      },
+      {
+        inlet_id: SAN_LI_WEST_THIRD_INLET_ID,
+        inlet_code: 'N54R328A069',
+        diameter_readings: [60.2],
+        average_diameter: 60.2,
+        diameter_difference: 0,
+        out_of_roundness: 0,
+        wall_thickness: null,
+        instrument: '数显游标卡尺',
+        note: '西侧第三个引入口；单次外径读数按演示值 60.2 mm 记录。照片由用户后续上传。',
+      },
+    ],
+  },
+  measured_value: 60.2,
+  unit: 'mm',
+  note: '当前完成西侧前三个引入口，未覆盖全部引入口，因此状态保持进行中。',
+  created_at: '2026-07-17T09:30:00.000+08:00',
+  updated_at: '2026-07-17T09:30:00.000+08:00',
+}
+
 export const MOCK_RECORDS: InspectionRecord[] = [
   ...nhjyRecords,
   ...demoRecords,
@@ -443,6 +564,8 @@ export const MOCK_RECORDS: InspectionRecord[] = [
   sanLiDcStrayCurrentRecord,
   sanLiCoatingDetectRecord,
   sanLiPipeGroundPotentialRecord,
+  sanLiElectricContinuityRecord,
+  sanLiInletParameterRecord,
 ]
 
 const MOCK_RECORDS_STORAGE_KEY = 'cp-data-system:mock-records'
@@ -507,7 +630,7 @@ function migrateSanLiCoatingDemoRecord(record: InspectionRecord): InspectionReco
     ...sanLiCoatingDetectRecord,
     ...record,
     unit_id: SAN_LI_FSKZ755856_UNIT_ID,
-    status: 'exception',
+    status: record.status ?? sanLiCoatingDetectRecord.status,
     result_summary: record.result_summary || sanLiCoatingDetectRecord.result_summary,
     result_data: {
       ...(sanLiCoatingDetectRecord.result_data ?? {}),
@@ -550,6 +673,84 @@ function migrateSanLiPipePotentialRecord(record: InspectionRecord): InspectionRe
   }
 }
 
+function migrateSanLiElectricContinuityRecord(record: InspectionRecord): InspectionRecord {
+  if (record.unit_id !== SAN_LI_FSKZ755856_UNIT_ID || record.item_code !== 'ELECTRIC_CONTINUITY') return record
+  const existingPoints = Array.isArray(record.result_data?.test_points)
+    ? record.result_data.test_points as Array<Record<string, unknown>>
+    : []
+  const baselinePoints = sanLiElectricContinuityRecord.result_data?.test_points as Array<Record<string, unknown>>
+  const points = baselinePoints.map((baseline) => {
+    const existing = existingPoints.find((point) => Number(point.id) === Number(baseline.id))
+    return existing ? { ...baseline, ...existing } : baseline
+  })
+  existingPoints.forEach((point) => {
+    if (!points.some((item) => Number(item.id) === Number(point.id))) points.push(point)
+  })
+  const completedCount = points.filter((point) => Number.isFinite(Number(point.measured_resistance))).length
+  return {
+    ...sanLiElectricContinuityRecord,
+    ...record,
+    result_summary: record.result_summary || sanLiElectricContinuityRecord.result_summary,
+    result_data: {
+      ...(sanLiElectricContinuityRecord.result_data ?? {}),
+      ...(record.result_data ?? {}),
+      point_count: points.length,
+      completed_point_count: completedCount,
+      test_points: points,
+    },
+    measured_value: record.measured_value ?? 310.3,
+    unit: 'kΩ',
+  }
+}
+
+function migrateSanLiInletParameterRecord(record: InspectionRecord): InspectionRecord {
+  if (record.unit_id !== SAN_LI_FSKZ755856_UNIT_ID || record.item_code !== 'INLET_PARAM') return record
+  const existingInlets = Array.isArray(record.result_data?.inlets)
+    ? record.result_data.inlets as Array<Record<string, unknown>>
+    : []
+  const baselineReadings = sanLiInletParameterRecord.result_data?.inlets as Array<Record<string, unknown>>
+  const targetIds = new Set(baselineReadings.map((reading) => Number(reading.inlet_id)))
+  const existingWestReading = existingInlets.find((reading) => Number(reading.inlet_id) === SAN_LI_LEFTMOST_INLET_ID)
+  const existingSecondReading = existingInlets.find((reading) => Number(reading.inlet_id) === SAN_LI_WEST_SECOND_INLET_ID)
+  const existingThirdReading = existingInlets.find((reading) => Number(reading.inlet_id) === SAN_LI_WEST_THIRD_INLET_ID)
+  const legacyWestReadings = existingWestReading?.diameter_readings
+  const hasDiameterResult = (reading?: Record<string, unknown>) => reading?.average_diameter !== null
+    && reading?.average_diameter !== undefined
+    && Number.isFinite(Number(reading.average_diameter))
+  const isLegacyThreeReadingsAtFirstInlet = Array.isArray(legacyWestReadings)
+    && legacyWestReadings.length === 3
+    && !hasDiameterResult(existingSecondReading)
+    && !hasDiameterResult(existingThirdReading)
+  const inlets = isLegacyThreeReadingsAtFirstInlet
+    ? [...baselineReadings, ...existingInlets.filter((reading) => !targetIds.has(Number(reading.inlet_id)))]
+    : [
+        ...baselineReadings.map((baseline) => {
+          const existing = existingInlets.find((reading) => Number(reading.inlet_id) === Number(baseline.inlet_id))
+          return existing ? { ...baseline, ...existing } : baseline
+        }),
+        ...existingInlets.filter((reading) => !targetIds.has(Number(reading.inlet_id))),
+      ]
+  const completedCount = inlets.filter((reading) => Number.isFinite(Number(reading.average_diameter))).length
+  return {
+    ...sanLiInletParameterRecord,
+    ...record,
+    result_data: {
+      ...(sanLiInletParameterRecord.result_data ?? {}),
+      ...(record.result_data ?? {}),
+      inlet_count: Math.max(28, Number(record.result_data?.inlet_count) || 0),
+      completed_inlet_count: completedCount,
+      method: isLegacyThreeReadingsAtFirstInlet ? '数显游标卡尺单点测量法' : (record.result_data?.method ?? '数显游标卡尺单点测量法'),
+      inlets,
+    },
+    result_summary: isLegacyThreeReadingsAtFirstInlet
+      ? sanLiInletParameterRecord.result_summary
+      : (record.result_summary || sanLiInletParameterRecord.result_summary),
+    note: isLegacyThreeReadingsAtFirstInlet ? sanLiInletParameterRecord.note : record.note,
+    measured_value: record.measured_value ?? 60.2,
+    unit: 'mm',
+  }
+}
+
 function loadPersistedRecords(): InspectionRecord[] | null {
   if (typeof window === 'undefined') return null
   try {
@@ -567,6 +768,8 @@ function loadPersistedRecords(): InspectionRecord[] | null {
       .map(migrateSanLiSoilDemoRecord)
       .map(migrateSanLiCoatingDemoRecord)
       .map(migrateSanLiPipePotentialRecord)
+      .map(migrateSanLiElectricContinuityRecord)
+      .map(migrateSanLiInletParameterRecord)
 
     // 合并新增的内置演示数据，同时保留浏览器中已有的编辑结果。
     const persistedByKey = new Map(persisted.map((record) => [recordKey(record), record]))

@@ -12,6 +12,8 @@ import { hasSoilCoordinates, soilPhotoOwnerKey, soilResistivityPoints } from '@/
 import { dcStrayCurrentPoints, dcStrayPhotoOwnerKey, hasDcStrayCoordinates } from '@/utils/dcStrayCurrent'
 import { coatingDamagePhotoOwnerKey, coatingDamagePoints, hasCoatingDamageCoordinates } from '@/utils/coatingDetect'
 import { hasNaturalPotential, inletPotentialReadings, pipePotentialPhotoOwnerKey } from '@/utils/pipeGroundPotential'
+import { electricContinuityPhotoOwnerKey, electricContinuityPoints, hasElectricContinuityCoordinates, hasElectricContinuityResult } from '@/utils/electricContinuity'
+import { hasInletParameterResult, inletParameterPhotoOwnerKey, inletParameterReadings } from '@/utils/inletParameters'
 import type { CorrosionUnit, InspectionItemCode } from '@/types/models'
 
 const emit = defineEmits<{
@@ -55,8 +57,8 @@ function handleThemeChange() {
   map?.setMapStyle?.(currentMapStyle())
 }
 
-const overlays: Record<FacilityKey | 'community' | 'insulation' | 'soil' | 'dcStray' | 'coating' | 'potential', any[]> = {
-  unit: [], pipe: [], joint: [], regulator: [], inlet: [], community: [], insulation: [], soil: [], dcStray: [], coating: [], potential: [],
+const overlays: Record<FacilityKey | 'community' | 'insulation' | 'soil' | 'dcStray' | 'coating' | 'potential' | 'continuity' | 'inletParameter', any[]> = {
+  unit: [], pipe: [], joint: [], regulator: [], inlet: [], community: [], insulation: [], soil: [], dcStray: [], coating: [], potential: [], continuity: [], inletParameter: [],
 }
 const unitPolygons = new Map<number, any>()
 const unitMarkers = new Map<number, any>()
@@ -70,6 +72,10 @@ const coatingPhotoUrls = new Set<string>()
 let coatingRenderSequence = 0
 const potentialPhotoUrls = new Set<string>()
 let potentialRenderSequence = 0
+const continuityPhotoUrls = new Set<string>()
+let continuityRenderSequence = 0
+const inletParameterPhotoUrls = new Set<string>()
+let inletParameterRenderSequence = 0
 
 const COMMUNITY_VIEW_ZOOM = 17
 const COMMUNITY_INFO_MIN_ZOOM = 16
@@ -643,6 +649,117 @@ function handlePotentialDataChange(event: Event) {
   if (!Number.isFinite(unitId) || unitId === store.selectedUnit?.id) void renderPipeGroundPotential()
 }
 
+function clearContinuityLayer() {
+  continuityRenderSequence++
+  clearKind('continuity')
+  continuityPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
+  continuityPhotoUrls.clear()
+}
+
+async function renderElectricContinuity() {
+  clearContinuityLayer()
+  if (!map || props.activeDataModule !== 'ELECTRIC_CONTINUITY' || !store.selectedUnit) return
+  const sequence = continuityRenderSequence
+  const unitId = store.selectedUnit.id
+  const record = [...store.records]
+    .filter((item) => item.unit_id === unitId && item.item_code === 'ELECTRIC_CONTINUITY')
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  const points = electricContinuityPoints(record).filter(hasElectricContinuityCoordinates)
+  const photoEntries = await Promise.all(points.map(async (point) => {
+    try {
+      return [point.id, await listInspectionPhotos(electricContinuityPhotoOwnerKey(unitId, point.id))] as const
+    } catch (error) {
+      console.warn(`[Continuity] ${point.name} 照片读取失败：`, error)
+      return [point.id, []] as const
+    }
+  }))
+  if (sequence !== continuityRenderSequence || props.activeDataModule !== 'ELECTRIC_CONTINUITY' || store.selectedUnit?.id !== unitId) return
+  const photosByPoint = new Map(photoEntries)
+
+  points.forEach((point, index) => {
+    const builtInPhotos = point.photo_urls.map((photo) => `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`)
+    const savedPhotos = (photosByPoint.get(point.id) ?? []).map((photo) => {
+      const url = URL.createObjectURL(photo.blob)
+      continuityPhotoUrls.add(url)
+      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+    })
+    const photos = [...builtInPhotos, ...savedPhotos]
+    const photoHtml = photos.length
+      ? `<div class="continuity-map-photos">${photos.join('')}</div>`
+      : '<div class="continuity-map-photo-empty">照片待上传</div>'
+    const complete = hasElectricContinuityResult(point)
+    const statusClass = point.is_connected === true ? ' is-connected' : point.is_connected === false ? ' is-isolated' : ''
+    const cardHtml = complete
+      ? `<div class="continuity-map-card"><header><span>测试位置 ${index + 1}</span><strong>${e(point.name)}</strong><i>${e(point.conclusion)}</i></header><div class="continuity-map-primary"><span>测试电阻</span><b>${Number(point.measured_resistance).toFixed(1)} ${e(point.resistance_unit)}</b></div><div class="continuity-map-values"><div><span>测试对象</span><b>${e(point.target_type)}</b></div><div><span>测试方法</span><b>${e(String(record?.result_data?.method ?? '电阻测量法'))}</b></div></div><div class="continuity-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${point.note ? `<div class="continuity-map-note">${e(point.note)}</div>` : ''}${photoHtml}</div>`
+      : `<div class="continuity-map-pending"><strong>${e(point.name)}</strong><span>电联通性待录入</span></div>`
+    const content = htmlElement(
+      `continuity-map-marker${complete ? ' is-complete' : ' is-pending'}${statusClass}`,
+      `${cardHtml}<div class="continuity-map-pin"><span>↔</span></div>`,
+    )
+    content.addEventListener('click', (event) => event.stopPropagation())
+    const restingZIndex = complete ? 1660 : 1020 + index
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: restingZIndex, clickable: true, bubble: false })
+    content.addEventListener('mouseenter', () => item.setzIndex?.(2060))
+    content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+    add('continuity', item)
+  })
+}
+
+function handleElectricContinuityDataChange(event: Event) {
+  const unitId = Number((event as CustomEvent<{ unitId?: number }>).detail?.unitId)
+  if (!Number.isFinite(unitId) || unitId === store.selectedUnit?.id) void renderElectricContinuity()
+}
+
+function clearInletParameterLayer() {
+  inletParameterRenderSequence++
+  clearKind('inletParameter')
+  inletParameterPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
+  inletParameterPhotoUrls.clear()
+}
+
+async function renderInletParameters() {
+  clearInletParameterLayer()
+  if (!map || props.activeDataModule !== 'INLET_PARAM' || !store.selectedUnit) return
+  const sequence = inletParameterRenderSequence
+  const unitId = store.selectedUnit.id
+  const inlets = (store.facilities?.inlets ?? []).filter((inlet) => inlet.unit_id === unitId).sort((a, b) => a.lng - b.lng || a.lat - b.lat)
+  const record = [...store.records].filter((item) => item.unit_id === unitId && item.item_code === 'INLET_PARAM').sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  const readings = inletParameterReadings(record)
+  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
+    try { return [inlet.fid, await listInspectionPhotos(inletParameterPhotoOwnerKey(unitId, inlet.fid))] as const }
+    catch (error) { console.warn(`[InletParameter] ${inlet.ecode} 照片读取失败：`, error); return [inlet.fid, []] as const }
+  }))
+  if (sequence !== inletParameterRenderSequence || props.activeDataModule !== 'INLET_PARAM' || store.selectedUnit?.id !== unitId) return
+  const photosByInlet = new Map(photoEntries)
+
+  inlets.forEach((inlet, index) => {
+    const reading = readings.get(inlet.fid)
+    const complete = hasInletParameterResult(reading)
+    const photos = (photosByInlet.get(inlet.fid) ?? []).map((photo) => {
+      const url = URL.createObjectURL(photo.blob); inletParameterPhotoUrls.add(url)
+      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+    })
+    const photoHtml = photos.length ? `<div class="inlet-parameter-map-photos">${photos.join('')}</div>` : '<div class="inlet-parameter-map-photo-empty">照片待上传</div>'
+    const readingsHtml = reading?.diameter_readings.length
+      ? `<div class="inlet-parameter-map-readings">${reading.diameter_readings.map((value, i) => `<span>测量${i + 1}<b>${value.toFixed(1)} mm</b></span>`).join('')}</div>`
+      : ''
+    const cardHtml = complete
+      ? `<div class="inlet-parameter-map-card"><header><span>引入口 ${index + 1}</span><strong>${e(inlet.ecode || String(inlet.fid))}</strong><i>已检测</i></header><div class="inlet-parameter-map-primary"><span>平均外径</span><b>${Number(reading!.average_diameter).toFixed(1)} mm</b></div>${readingsHtml}<div class="inlet-parameter-map-values"><div><span>最大偏差</span><b>${reading?.diameter_difference?.toFixed(2) ?? '—'} mm</b></div><div><span>不圆度</span><b>${reading?.out_of_roundness?.toFixed(3) ?? '—'} %</b></div><div><span>壁厚</span><b>${reading?.wall_thickness !== null && reading?.wall_thickness !== undefined ? `${reading.wall_thickness.toFixed(2)} mm` : '待录入'}</b></div><div><span>仪器</span><b>${e(reading?.instrument || '数显游标卡尺')}</b></div></div>${reading?.note ? `<div class="inlet-parameter-map-note">${e(reading.note)}</div>` : ''}${photoHtml}</div>`
+      : `<div class="inlet-parameter-map-pending"><strong>${e(inlet.ecode || String(inlet.fid))}</strong><span>引入口参数待录入</span></div>`
+    const content = htmlElement(`inlet-parameter-map-marker${complete ? ' is-complete' : ' is-pending'}`, `${cardHtml}<div class="inlet-parameter-map-pin"><span>Ø</span></div>`)
+    content.addEventListener('click', (event) => event.stopPropagation())
+    const restingZIndex = complete ? 1670 : 1030 + index
+    const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: restingZIndex, clickable: true, bubble: false })
+    content.addEventListener('mouseenter', () => item.setzIndex?.(2070)); content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+    add('inletParameter', item)
+  })
+}
+
+function handleInletParameterDataChange(event: Event) {
+  const unitId = Number((event as CustomEvent<{ unitId?: number }>).detail?.unitId)
+  if (!Number.isFinite(unitId) || unitId === store.selectedUnit?.id) void renderInletParameters()
+}
+
 function groupsByCommunity() {
   const groups = new Map<string, CorrosionUnit[]>()
   store.units.forEach((unit) => {
@@ -751,6 +868,8 @@ function applyVisibility() {
     setShown('dcStray', false)
     setShown('coating', false)
     setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
     syncCommunityInfoVisibility()
     return
   }
@@ -766,6 +885,8 @@ function applyVisibility() {
     setShown('dcStray', false)
     setShown('coating', false)
     setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
     return
   }
   if (props.activeDataModule === 'SOIL_RESISTIVITY') {
@@ -779,6 +900,8 @@ function applyVisibility() {
     setShown('dcStray', false)
     setShown('coating', false)
     setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
     return
   }
   if (props.activeDataModule === 'DC_STRAY_CURRENT') {
@@ -792,6 +915,8 @@ function applyVisibility() {
     setShown('dcStray', true)
     setShown('coating', false)
     setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
     return
   }
   if (props.activeDataModule === 'COATING_DETECT') {
@@ -805,6 +930,8 @@ function applyVisibility() {
     setShown('dcStray', false)
     setShown('coating', true)
     setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
     return
   }
   if (props.activeDataModule === 'PIPE_GROUND_POTENTIAL') {
@@ -818,6 +945,38 @@ function applyVisibility() {
     setShown('dcStray', false)
     setShown('coating', false)
     setShown('potential', true)
+    setShown('continuity', false)
+    setShown('inletParameter', false)
+    return
+  }
+  if (props.activeDataModule === 'ELECTRIC_CONTINUITY') {
+    setShown('unit', true)
+    setShown('pipe', true)
+    setShown('joint', false)
+    setShown('regulator', false)
+    setShown('inlet', false)
+    setShown('insulation', false)
+    setShown('soil', false)
+    setShown('dcStray', false)
+    setShown('coating', false)
+    setShown('potential', false)
+    setShown('continuity', true)
+    setShown('inletParameter', false)
+    return
+  }
+  if (props.activeDataModule === 'INLET_PARAM') {
+    setShown('unit', true)
+    setShown('pipe', true)
+    setShown('joint', false)
+    setShown('regulator', false)
+    setShown('inlet', false)
+    setShown('insulation', false)
+    setShown('soil', false)
+    setShown('dcStray', false)
+    setShown('coating', false)
+    setShown('potential', false)
+    setShown('continuity', false)
+    setShown('inletParameter', true)
     return
   }
   ;(['unit', 'pipe', 'joint', 'regulator', 'inlet'] as FacilityKey[]).forEach((kind) => setShown(kind, props.visibility[kind]))
@@ -826,6 +985,8 @@ function applyVisibility() {
   setShown('dcStray', false)
   setShown('coating', false)
   setShown('potential', false)
+  setShown('continuity', false)
+  setShown('inletParameter', false)
 }
 
 function handleZoomEnd() {
@@ -867,6 +1028,8 @@ function renderAll() {
   void renderDcStrayCurrent()
   void renderCoatingDamage()
   void renderPipeGroundPotential()
+  void renderElectricContinuity()
+  void renderInletParameters()
   applyVisibility()
   fitToAll()
 }
@@ -910,6 +1073,8 @@ onMounted(async () => {
     window.addEventListener('dcstraycurrentdatachange', handleDcStrayDataChange)
     window.addEventListener('coatingdetectdatachange', handleCoatingDataChange)
     window.addEventListener('pipegroundpotentialdatachange', handlePotentialDataChange)
+    window.addEventListener('electriccontinuitydatachange', handleElectricContinuityDataChange)
+    window.addEventListener('inletparameterdatachange', handleInletParameterDataChange)
     isCommunityView = map.getZoom() < COMMUNITY_VIEW_ZOOM
     renderAll()
   } catch (error) {
@@ -932,6 +1097,8 @@ watch(() => props.activeDataModule, () => {
   void renderDcStrayCurrent()
   void renderCoatingDamage()
   void renderPipeGroundPotential()
+  void renderElectricContinuity()
+  void renderInletParameters()
 })
 watch(
   () => store.records.filter((record) => record.item_code === 'JOINT_VERIFY').map((record) => `${record.id}:${record.updated_at}`).join(','),
@@ -954,6 +1121,14 @@ watch(
   () => void renderPipeGroundPotential(),
 )
 watch(
+  () => store.records.filter((record) => record.item_code === 'ELECTRIC_CONTINUITY').map((record) => `${record.id}:${record.updated_at}`).join(','),
+  () => void renderElectricContinuity(),
+)
+watch(
+  () => store.records.filter((record) => record.item_code === 'INLET_PARAM').map((record) => `${record.id}:${record.updated_at}`).join(','),
+  () => void renderInletParameters(),
+)
+watch(
   () => store.units.map((unit) => `${unit.id}:${unit.inspection_progress.toFixed(3)}:${unit.inspection_status}`).join(','),
   () => {
     if (!map) return
@@ -973,6 +1148,8 @@ watch(() => store.selectedUnit?.id, (next, previous) => {
   void renderDcStrayCurrent()
   void renderCoatingDamage()
   void renderPipeGroundPotential()
+  void renderElectricContinuity()
+  void renderInletParameters()
 })
 watch(() => store.hoveredUnit?.id, (next, previous) => {
   if (previous !== undefined && previous !== store.selectedUnit?.id) setUnitStyle(previous, 'default')
@@ -994,11 +1171,15 @@ onBeforeUnmount(() => {
   window.removeEventListener('dcstraycurrentdatachange', handleDcStrayDataChange)
   window.removeEventListener('coatingdetectdatachange', handleCoatingDataChange)
   window.removeEventListener('pipegroundpotentialdatachange', handlePotentialDataChange)
+  window.removeEventListener('electriccontinuitydatachange', handleElectricContinuityDataChange)
+  window.removeEventListener('inletparameterdatachange', handleInletParameterDataChange)
   clearInsulationLayer()
   clearSoilLayer()
   clearDcStrayLayer()
   clearCoatingLayer()
   clearPotentialLayer()
+  clearContinuityLayer()
+  clearInletParameterLayer()
   clearFacilitySelection()
   if (store.selectedUnit) store.selectUnit(null)
   if (store.hoveredUnit) store.hoverUnit(null)

@@ -64,6 +64,11 @@ function formatRepresentativeValue(config: ModuleConfig, record?: InspectionReco
     if (Number.isFinite(average)) return `${average.toFixed(4)} V`
   }
 
+  if (config.code === 'INLET_PARAM') {
+    const average = Number(record.result_data?.average_diameter ?? record.result_data?.diameter ?? record.measured_value)
+    if (Number.isFinite(average)) return `${average.toFixed(1)} mm`
+  }
+
   if (record.status === 'pending') return '未检测'
 
   const raw = record.result_data?.[config.field]
@@ -83,6 +88,7 @@ function formatRepresentativeValue(config: ModuleConfig, record?: InspectionReco
 const modules = computed(() => MODULE_CONFIGS.map((config) => ({
   ...config,
   value: formatRepresentativeValue(config, latestRecords.value.get(config.code)),
+  status: latestRecords.value.get(config.code)?.status ?? 'pending',
 })))
 
 function moduleStyle(index: number): Record<string, string> {
@@ -117,7 +123,7 @@ function moduleStyle(index: number): Record<string, string> {
       :key="module.code"
       type="button"
       class="unit-data-module is-enabled"
-      :class="{ 'is-active': activeCode === module.code }"
+      :class="{ 'is-active': activeCode === module.code, 'is-exception': module.status === 'exception' }"
       :style="moduleStyle(index)"
       @click="emit('select', module.code)"
     >
@@ -148,6 +154,7 @@ function moduleStyle(index: number): Record<string, string> {
         <span class="unit-data-module-name">{{ module.name }}</span>
         <span class="unit-data-module-value">{{ module.value }}</span>
       </span>
+      <span v-if="module.status === 'exception'" class="unit-data-module-status">异常</span>
     </button>
 
     <button
