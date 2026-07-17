@@ -659,6 +659,241 @@ export function generateReport(type: ReportType, d: ZhiwenData, opts: ReportOpti
   }
 }
 
+/* ============================================================
+ * 针对性报告（focused）
+ *
+ * 用途：用户在智问里说"管线总长"这种问题后，点了"出报告"按钮，
+ *      我们用这一次 query 的结果，包装成 1-2 页的针对性小报告。
+ *
+ * 设计原则：
+ *   - 只讲当前问题，不夹杂其他数据
+ *   - 章节尽量精简：摘要 → 关键指标 → 图表 → 详细数据 → 结论
+ *   - 标题直接用用户问的问题
+ *   - 文件名按 query 摘要生成
+ * ============================================================ */
+export interface FocusedReportInput {
+  /** 用户的原始问题 */
+  question: string
+  /** QueryResult（来自 runQuery） */
+  result: {
+    text?: string
+    table?: { headers: string[]; rows: Array<Record<string, any>> }
+    chart?: { type: 'bar' | 'line' | 'pie'; title: string; xField?: string; yField?: string; data: Array<{ name: string; value: number }> }
+    totalCount?: number
+    mapCommunity?: string
+    sql?: string
+  }
+  /** 数据范围（如"南海家园七里"） */
+  community?: string
+}
+
+export function buildFocusedReport(input: FocusedReportInput): Report {
+  const { question, result, community } = input
+  const cleanQ = question.trim().replace(/[\\/:*?"<>|\n\r]/g, ' ').slice(0, 60)
+  const communityLabel = community && community !== '全部' ? community : '全部小区'
+  const totalCount = result.totalCount ?? result.table?.rows.length ?? 0
+
+  // 摘要
+  const summaryHtml = [
+    `本报告针对您提出的问题：**"${cleanQ}"**，仅就该问题涉及的数据做集中分析。`,
+    result.text ? `\n\n📌 **核心结论**：${stripMarkdown(result.text)}` : '',
+    `\n\n📍 **数据范围**：${communityLabel}`,
+    totalCount > 0 ? `\n📊 **数据规模**：${totalCount} 条记录` : '',
+  ].filter(Boolean).join('')
+
+  // 关键指标：从 chart 或 table 里提取前 4-6 个
+  const kpiData = extractKpis(result)
+
+  // 章节
+  const sections: ReportSection[] = [
+    { title: '一、报告摘要', type: 'summary', data: summaryHtml },
+  ]
+
+  if (kpiData.length > 0) {
+    sections.push({
+      title: '二、关键指标',
+      type: 'kpi',
+      data: kpiData,
+    })
+  }
+
+  if (result.chart) {
+    sections.push({
+      title: '三、图表分析',
+      type: 'chart',
+      data: result.chart,
+    })
+  }
+
+  if (result.table && result.table.rows.length > 0) {
+    sections.push({
+      title: result.chart ? '四、详细数据' : '三、详细数据',
+      type: 'table',
+      data: result.table,
+    })
+  }
+
+  // 结论/分析
+  const conclusion = buildConclusion(question, result, totalCount)
+  sections.push({
+    title: result.chart || result.table ? '五、分析与建议' : '三、分析与建议',
+    type: 'text',
+    data: conclusion,
+  })
+
+  // 直接构造 Report（不走 assembleReport，因为 assembleReport 要重新写章节序号）
+  return {
+    type: 'overview',  // 复用 ReportType 字段（暂时没有 'focused'，不影响展示）
+    title: `📌 ${cleanQ}`,
+    subtitle: `针对问题"${cleanQ}"的针对性分析 · ${communityLabel}`,
+    generatedAt: nowString(),
+    community: communityLabel,
+    sections,
+    meta: {
+      totalPipes: 0,
+      totalRecords: totalCount,
+      totalFacilities: 0,
+    },
+  }
+}
+
+/** 从 query result 里抽 4-6 个 KPI 卡片 */
+function extractKpis(result: FocusedReportInput['result']): Array<{ label: string; value: string; unit?: string; color: string }> {
+  const kpis: Array<{ label: string; value: string; unit?: string; color: string }> = []
+
+  // 1) 如果有 chart，挑最大/最小/总数
+  if (result.chart && result.chart.data.length > 0) {
+    const data = result.chart.data
+    const total = data.reduce((s, d) => s + (Number(d.value) || 0), 0)
+    const max = data.reduce((m, d) => (d.value > m.value ? d : m), data[0])
+    const min = data.reduce((m, d) => (d.value < m.value ? d : m), data[0])
+
+    kpis.push({
+      label: '数据组数',
+      value: String(data.length),
+      unit: '组',
+      color: '#409eff',
+    })
+    kpis.push({
+      label: '合计',
+      value: formatNumber(total),
+      unit: result.chart.yField === 'value' ? '' : '',
+      color: '#67c23a',
+    })
+    if (data.length > 1) {
+      kpis.push({
+        label: `最大：${max.name}`.slice(0, 16),
+        value: formatNumber(max.value),
+        color: '#e6a23c',
+      })
+      kpis.push({
+        label: `最小：${min.name}`.slice(0, 16),
+        value: formatNumber(min.value),
+        color: '#909399',
+      })
+    }
+  }
+
+  // 2) 如果有 table，统计行数
+  if (result.table) {
+    if (kpis.length === 0) {
+      kpis.push({
+        label: '返回行数',
+        value: String(result.table.rows.length),
+        unit: '行',
+        color: '#409eff',
+      })
+    }
+    // 找数值列算个平均
+    const numCol = findFirstNumericColumn(result.table)
+    if (numCol) {
+      const values = result.table.rows.map((r) => Number(r[numCol])).filter((v) => !isNaN(v))
+      if (values.length > 0) {
+        const avg = values.reduce((s, v) => s + v, 0) / values.length
+        const sum = values.reduce((s, v) => s + v, 0)
+        kpis.push({
+          label: `${numCol} 平均`,
+          value: formatNumber(avg),
+          color: '#9c64f0',
+        })
+        if (kpis.length < 6) {
+          kpis.push({
+            label: `${numCol} 合计`,
+            value: formatNumber(sum),
+            color: '#67c23a',
+          })
+        }
+      }
+    }
+  }
+
+  // 3) totalCount
+  if (result.totalCount !== undefined && kpis.length < 6) {
+    kpis.push({
+      label: '记录数',
+      value: String(result.totalCount),
+      unit: '条',
+      color: '#409eff',
+    })
+  }
+
+  return kpis.slice(0, 6)
+}
+
+function findFirstNumericColumn(table: NonNullable<FocusedReportInput['result']['table']>): string | null {
+  for (const h of table.headers) {
+    const v = table.rows.find((r) => r[h] !== undefined && r[h] !== null && r[h] !== '')?.[h]
+    if (typeof v === 'number' || (!isNaN(parseFloat(String(v))) && String(v).trim() !== '')) {
+      return h
+    }
+  }
+  return null
+}
+
+function buildConclusion(question: string, result: FocusedReportInput['result'], totalCount: number): string {
+  const q = question.toLowerCase()
+  const parts: string[] = []
+
+  if (totalCount === 0) {
+    parts.push('⚠️ **数据为空**：当前查询条件下未匹配到任何数据。')
+    parts.push('建议：')
+    parts.push('- 检查小区名称是否正确（如"七里"、"三里"）')
+    parts.push('- 放宽过滤条件（去掉管径/压力/材质等）')
+    parts.push('- 在右上角 ⚙ 开启 LLM 兜底')
+  } else {
+    if (result.chart && result.chart.data.length > 0) {
+      const data = result.chart.data
+      const top = data.slice().sort((a, b) => b.value - a.value).slice(0, 3)
+      parts.push(`✅ **数据概览**：共 ${totalCount} 条记录，关键维度 TOP 3：`)
+      top.forEach((d, i) => parts.push(`${i + 1}. ${d.name}：**${formatNumber(d.value)}**`))
+    } else if (result.table) {
+      parts.push(`✅ **数据概览**：本次查询返回 ${result.table.rows.length} 条记录。`)
+    }
+    parts.push('')
+    parts.push('💡 **后续建议**：')
+    parts.push('- 如需调整范围（小区、压力、材质等），直接重新提问即可')
+    parts.push('- 切换到「报告中心」可对比多种类型的深度报告')
+    parts.push('- 点击工具栏「下载 PDF」可保存为 A4 文档')
+  }
+
+  return parts.join('\n')
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/\n+/g, ' ')
+    .slice(0, 200)
+}
+
+function formatNumber(n: number): string {
+  if (!isFinite(n)) return '—'
+  if (Math.abs(n) >= 10000) return (n / 10000).toFixed(2) + 'w'
+  if (Number.isInteger(n)) return String(n)
+  return n.toFixed(2)
+}
+
 export const REPORT_TYPES: Array<{
   type: ReportType
   icon: string

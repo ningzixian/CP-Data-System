@@ -13,11 +13,11 @@ import { useCpStore } from '@/stores/cp'
 import { loadZhiwenNetworkData, projectCpData } from '@/zhiwen/dataLoader'
 import {
   runQuery, scoreConfidence, PRESET_QUERIES, buildLLMPrompt, planToText, planToSql,
-  parseReportRequest, isRegenerateIntent,
+  parseReportRequest, isRegenerateIntent, canMakeReportFromResult,
   type ZhiwenData, type QueryResult, type ChartSpec, type LLMQueryPlan,
 } from '@/zhiwen/engine'
 import {
-  generateReport, REPORT_TYPES, ITEM_CODES,
+  generateReport, REPORT_TYPES, ITEM_CODES, buildFocusedReport,
   type Report, type ReportOptions,
 } from '@/zhiwen/reportGenerator'
 import { generateSuggestions, getSuggestionColor, type Suggestion } from '@/zhiwen/suggestions'
@@ -28,6 +28,7 @@ import {
 import { exportQueryResult, buildFileName, formatBytes, type ExportFormat } from '@/zhiwen/exporter'
 import ReportCenter from './ReportCenter.vue'
 import ReportPreview from './ReportPreview.vue'
+import ReportSidebarPanel from './ReportSidebarPanel.vue'
 import type { Report as ReportTypeAlias } from '@/zhiwen/reportGenerator'
 
 const store = useCpStore()
@@ -321,6 +322,61 @@ function downloadAgain() {
 
 // ============== 报告处理 ==============
 
+/** 当前问题是否足以出针对性报告（任何有结论的 query 都可以） */
+function canMakeFocusedReport(r: QueryResult): boolean {
+  return !!(r.text || r.table || r.chart)
+}
+
+/** 当前 query 文本（从历史最后一条取） */
+function currentQuestionText(): string {
+  return history.value[0]?.q || question.value || '查询结果'
+}
+
+/**
+ * 针对当前 query 出"只讲这个事"的报告。
+ * 跟综合概览报告不同，章节只包含这次结果相关的指标/图表/表格/结论。
+ */
+function makeFocusedReport() {
+  if (!result.value) {
+    ElMessage.warning('请先发起一次查询')
+    return
+  }
+  const q = currentQuestionText()
+  const community = result.value.mapCommunity || result.value.report?.community || '全部小区'
+  const focused = buildFocusedReport({
+    question: q,
+    result: {
+      text: result.value.text,
+      table: result.value.table,
+      chart: result.value.chart,
+      totalCount: result.value.totalCount,
+      mapCommunity: result.value.mapCommunity,
+      sql: result.value.sql,
+    },
+    community,
+  })
+  // 把 result 升级成"显示报告"形态
+  result.value = {
+    ...result.value,
+    isReport: true,
+    report: focused,
+    reportOptions: { community },
+    text: `✅ 已基于当前问题"${q}"生成针对性报告。\n\n${focused.sections[0]?.data || ''}\n\n💡 工具栏可下载 PDF。`,
+  }
+  // 入历史
+  history.value.unshift({
+    q: q,
+    r: result.value,
+    at: Date.now(),
+  })
+  if (history.value.length > 20) history.value.pop()
+  // 滚到报告
+  nextTick(() => {
+    const el = document.querySelector('.report-preview')
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
 /** 重新生成报告（用同参数） */
 function regenerateReport(options: ReportOptions) {
   if (!result.value?.report) return
@@ -365,6 +421,14 @@ function closeReport() {
   result.value = null
   chart?.clear()
   clearMap()
+}
+
+/** 滚动到中间完整报告（由右侧报告摘要面板的"查看完整报告"触发） */
+function scrollToFullReport() {
+  nextTick(() => {
+    const el = document.querySelector('.report-preview')
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 function usePreset(p: { label: string; query: string }) {
@@ -968,6 +1032,16 @@ function renderText(text: string) {
               <el-tag v-else-if="result.isReport" size="small" type="primary" effect="dark">📄 报告</el-tag>
               <el-tag v-else size="small" type="success" effect="dark">规则引擎</el-tag>
               <el-button
+                v-if="!result.isReport && canMakeFocusedReport(result)"
+                size="small"
+                type="warning"
+                plain
+                :icon="Document"
+                @click="makeFocusedReport"
+              >
+                出报告
+              </el-button>
+              <el-button
                 v-if="result.table"
                 size="small"
                 type="primary"
@@ -1016,7 +1090,7 @@ function renderText(text: string) {
         </div>
       </div>
 
-      <!-- 右侧：地图 -->
+      <!-- 右侧：地图 + 报告摘要 -->
       <div class="zw-right">
         <div class="zw-card">
           <div class="zw-card-title">
@@ -1032,7 +1106,7 @@ function renderText(text: string) {
               <span class="dot"></span>
               <span>当前查询：综合查询（全小区）</span>
             </div>
-            <div ref="mapRef" class="zw-map" />
+            <div ref="mapRef" class="zw-map" :class="{ 'zw-map--with-report': result?.isReport && result?.report }" />
           </div>
           <div class="zw-legend">
             <span><i style="background:#409EFF"></i>七里</span>
@@ -1043,6 +1117,13 @@ function renderText(text: string) {
             <span><i style="background:#e6a23c;border:2px solid #fff;box-shadow:0 0 6px #e6a23c"></i>进行中</span>
           </div>
         </div>
+
+        <!-- 报告摘要面板（出报告后才显示） -->
+        <ReportSidebarPanel
+          v-if="result?.isReport && result?.report"
+          :report="result.report"
+          @scroll-to-report="scrollToFullReport"
+        />
       </div>
     </div>
 
@@ -1546,6 +1627,10 @@ function renderText(text: string) {
   border-radius: 6px;
   background: #ebeef5;
   overflow: hidden;
+  transition: height 0.3s ease;
+}
+.zw-map--with-report {
+  height: 240px;
 }
 
 .zw-legend {

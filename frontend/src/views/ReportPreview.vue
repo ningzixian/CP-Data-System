@@ -8,10 +8,11 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import {
-  Printer, Download, Refresh, Edit, ArrowLeft, ChatLineRound, Close,
+  Printer, Download, Refresh, Edit, ArrowLeft, ChatLineRound, Close, Document,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { buildFileName, formatBytes } from '@/zhiwen/exporter'
+import { exportReportToPDF } from '@/zhiwen/pdfExporter'
 import type { Report, ReportOptions } from '@/zhiwen/reportGenerator'
 
 const props = defineProps<{
@@ -81,7 +82,37 @@ watch(() => props.report, () => {
   nextTick(() => renderAllCharts())
 }, { deep: false })
 
-// 导出 PDF
+// 导出 PDF（直接下载，非浏览器打印）
+const paperRef = ref<HTMLElement | null>(null)
+const pdfExporting = ref(false)
+const pdfProgress = ref(0)
+const pdfStage = ref('')
+async function downloadAsPDF() {
+  if (!paperRef.value) {
+    ElMessage.warning('报告还未渲染完成')
+    return
+  }
+  pdfExporting.value = true
+  pdfProgress.value = 0
+  pdfStage.value = '准备导出…'
+  try {
+    await exportReportToPDF(paperRef.value, {
+      title: props.report.title,
+      subtitle: props.report.subtitle,
+      onProgress: (p, stage) => {
+        pdfProgress.value = p
+        pdfStage.value = stage
+      },
+    })
+    ElMessage.success('PDF 已生成，正在下载')
+  } catch (e: any) {
+    console.error('[PDF 导出失败]', e)
+    ElMessage.error('PDF 导出失败：' + (e?.message || '未知错误'))
+  } finally {
+    pdfExporting.value = false
+  }
+}
+// 兼容老调用（浏览器打印）
 function printAsPDF() {
   document.body.classList.add('report-printing')
   setTimeout(() => {
@@ -157,8 +188,19 @@ function renderSummary(text: string) {
         <el-tooltip content="用同样参数重新生成" placement="bottom" v-if="regenerable !== false">
           <el-button size="small" :icon="Refresh" @click="regenerate">重新生成</el-button>
         </el-tooltip>
-        <el-tooltip content="打印 / 另存为 PDF" placement="bottom">
-          <el-button size="small" :icon="Printer" type="primary" @click="printAsPDF">导出 PDF</el-button>
+        <el-tooltip content="直接生成 PDF 文件并下载" placement="bottom">
+          <el-button
+            size="small"
+            :icon="Document"
+            type="primary"
+            :loading="pdfExporting"
+            @click="downloadAsPDF"
+          >
+            {{ pdfExporting ? `导出中 ${Math.round(pdfProgress * 100)}%` : '下载 PDF' }}
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="浏览器打印（可手动另存 PDF）" placement="bottom">
+          <el-button size="small" :icon="Printer" @click="printAsPDF">打印</el-button>
         </el-tooltip>
         <el-tooltip content="导出 Excel（每个章节一个 sheet）" placement="bottom">
           <el-button size="small" :icon="Download" type="success" @click="exportExcel">导出 Excel</el-button>
@@ -177,8 +219,19 @@ function renderSummary(text: string) {
       <span v-if="report.itemCode"><strong>检测项：</strong>{{ report.itemCode }}</span>
     </div>
 
+    <!-- 导出进度条 -->
+    <el-progress
+      v-if="pdfExporting"
+      :percentage="Math.round(pdfProgress * 100)"
+      :status="pdfProgress >= 1 ? 'success' : undefined"
+      :stroke-width="14"
+      style="margin-bottom: 10px"
+    >
+      <span style="font-size: 12px">{{ pdfStage || '导出中…' }} {{ Math.round(pdfProgress * 100) }}%</span>
+    </el-progress>
+
     <!-- 报告正文（A4 排版） -->
-    <div class="report-paper">
+    <div class="report-paper" ref="paperRef">
       <!-- 封面 -->
       <div class="report-cover">
         <div class="report-cover-tag">阴极保护数据管理系统 · 自动报告</div>

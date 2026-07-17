@@ -669,29 +669,56 @@ const ITEM_CODE_REVERSE: Record<string, string> = Object.fromEntries(
   Object.entries(ITEM_CODE_ALIAS).map(([k, v]) => [v, k]),
 )
 
-/** 识别自然语言里的"报告请求" */
+/** 识别自然语言里的"报告请求"
+ *
+ * 触发报告意图的场景（满足任一即视为报告请求）：
+ *   1. 强信号：动词+报告  →  "做/出/生成/写/给我/要+报告/单"
+ *   2. 强信号：综合/总览/整体 等显式总览词
+ *   3. 弱信号：含"报告" + 含至少一个具体报告维度词（管地电位/物探/异常/设施/进度/拓扑/检测等）
+ *
+ * 不触发的场景：
+ *   - 普通查询如"管线总长"、"七里调压箱有几个" → 返回 null，按普通查询处理
+ *   - 这种情况下用户想看报告可以点结果旁边的"出报告"按钮生成针对性报告
+ *
+ * 兜底策略：
+ *   - 识别到具体类型 → 用对应类型
+ *   - 仅强信号但没具体类型 → 综合概览
+ *   - 弱信号但命中具体类型 → 该类型报告
+ */
 export function parseReportRequest(text: string, _data: ZhiwenData): ReportRequest | null {
-  // 0. 必须有"报告"或"概览/总览"等关键词
-  const hasReport = /报告/.test(text)
-  const hasOverview = /综合概览|总览|概览|整体|汇总|总结/.test(text)
-  if (!hasReport && !hasOverview) return null
+  // 0. 强信号：动词+报告，或显式总览词
+  const strongIntent = /(做|出|生成|写|给我|要|来|来一份|出一份|做一份).{0,6}(报告|单)/.test(text)
+    || /^(报告|综合报告|总览|整体|整体报告|汇总|汇总报告|综合概览)/.test(text.trim())
+    || /综合概览|总览报告|整体报告|汇总报告|综合报告/.test(text)
 
-  // 1. 报告类型识别
+  // 1. 弱信号：含"报告" + 含具体报告维度词
+  const hasReportWord = /报告/.test(text)
+  const dimensionWords = /(管地电位|土壤电阻率|杂散电流|防腐层|涂层|绝缘接头|绝缘电阻|电联通|联通性|引入口参数|物探|拓扑|异常|不合格|不通过|设施|调压箱|引入口|进度|完成率|权属)/
+  const weakIntent = hasReportWord && dimensionWords.test(text)
+
+  if (!strongIntent && !weakIntent) return null
+
+  // 2. 报告类型识别
   let type: ReportType | null = null
   for (const { keywords, type: t } of REPORT_TYPE_ALIAS) {
     if (keywords.test(text)) { type = t; break }
   }
 
-  // 2. 专项检测：含"检测项名"且不是其他类型的关键词
+  // 3. 专项检测：含"检测项名"且不是其他类型的关键词
   if (!type) {
     const itemMatch = text.match(/(管地电位|土壤电阻率|杂散电流|防腐层|涂层|绝缘接头|绝缘电阻|电联通|联通性|引入口参数)/)
     if (itemMatch) type = 'inspection'
   }
 
-  // 3. 兜底：有"报告"或"概览"但没明确类型 → 综合概览
-  if (!type) type = 'overview'
+  // 4. 没识别到具体类型：
+  //    强信号 → 综合概览（用户明确要报告，但没说类型）
+  //    弱信号 + 无类型 → 返回 null（让用户用针对性的"出报告"按钮）
+  if (!type) {
+    if (!strongIntent) return null
+    type = 'overview'
+  }
 
-  // 4. 参数提取
+  // 5. 参数提取
   const community = matchCommunity(text) || '全部'
   const options: ReportOptions = { community }
 
@@ -705,6 +732,12 @@ export function parseReportRequest(text: string, _data: ZhiwenData): ReportReque
   }
 
   return { type, options, confidence: 0.9 }
+}
+
+/** 是否可以"基于该 query 出报告"（每个查询结果都该能出） */
+export function canMakeReportFromResult(result: QueryResult): boolean {
+  // 至少有文字结果或表格或图表 → 可生成针对性报告
+  return !!(result.text || result.table || result.chart)
 }
 
 /** 用户说"重新生成" / "再生成" / "重做" 时的处理 */
