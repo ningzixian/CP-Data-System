@@ -17,9 +17,12 @@
     "axios": "^1.6.7",
     "echarts": "^5.5.0",
     "element-plus": "^2.6.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "pinia": "^2.1.7",
     "vue": "^3.4.21",
-    "vue-router": "^4.3.0"
+    "vue-router": "^4.3.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@amap/amap-jsapi-types": "^0.0.15",

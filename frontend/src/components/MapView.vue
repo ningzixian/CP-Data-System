@@ -62,6 +62,7 @@ const overlays: Record<FacilityKey | 'community' | 'insulation' | 'soil' | 'dcSt
 }
 const unitPolygons = new Map<number, any>()
 const unitMarkers = new Map<number, any>()
+const unitProgressCircles = new Map<number, any>()
 const insulationPhotoUrls = new Set<string>()
 let insulationRenderSequence = 0
 const soilPhotoUrls = new Set<string>()
@@ -77,6 +78,71 @@ let continuityRenderSequence = 0
 const inletParameterPhotoUrls = new Set<string>()
 let inletParameterRenderSequence = 0
 
+const inspectionPhotoSelector = [
+  '.insulation-map-photos img',
+  '.soil-map-photos img',
+  '.dc-map-photos img',
+  '.coating-map-photos img',
+  '.potential-map-photos img',
+  '.continuity-map-photos img',
+  '.inlet-parameter-map-photos img',
+].join(', ')
+let inspectionPhotoPreview: HTMLImageElement | null = null
+let inspectionPhotoPreviewSource: HTMLImageElement | null = null
+
+function removeInspectionPhotoPreview() {
+  inspectionPhotoPreview?.remove()
+  inspectionPhotoPreview = null
+  inspectionPhotoPreviewSource = null
+}
+
+function handleInspectionPhotoOver(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const source = target.closest(inspectionPhotoSelector)
+  if (!(source instanceof HTMLImageElement) || source === inspectionPhotoPreviewSource) return
+
+  removeInspectionPhotoPreview()
+  const rect = source.getBoundingClientRect()
+  const ratio = source.naturalWidth > 0 && source.naturalHeight > 0
+    ? source.naturalWidth / source.naturalHeight
+    : Math.max(rect.width / Math.max(rect.height, 1), 0.1)
+  let width = rect.width * 2.5
+  let height = width / ratio
+  const maxWidth = window.innerWidth * 0.82
+  const maxHeight = window.innerHeight * 0.82
+  const fitScale = Math.min(1, maxWidth / width, maxHeight / height)
+  width *= fitScale
+  height *= fitScale
+  const margin = 12
+  const centerX = Math.min(
+    Math.max(rect.left + rect.width / 2, margin + width / 2),
+    window.innerWidth - margin - width / 2,
+  )
+  const centerY = Math.min(
+    Math.max(rect.top + rect.height / 2, margin + height / 2),
+    window.innerHeight - margin - height / 2,
+  )
+  const preview = document.createElement('img')
+  preview.className = 'inspection-photo-page-preview'
+  preview.src = source.currentSrc || source.src
+  preview.alt = source.alt
+  preview.style.width = `${width}px`
+  preview.style.left = `${centerX}px`
+  preview.style.top = `${centerY}px`
+  document.body.appendChild(preview)
+  inspectionPhotoPreview = preview
+  inspectionPhotoPreviewSource = source
+  requestAnimationFrame(() => {
+    if (inspectionPhotoPreview === preview) preview.classList.add('is-visible')
+  })
+}
+
+function handleInspectionPhotoOut(event: MouseEvent) {
+  if (event.target !== inspectionPhotoPreviewSource) return
+  removeInspectionPhotoPreview()
+}
+
 const COMMUNITY_VIEW_ZOOM = 17
 const COMMUNITY_INFO_MIN_ZOOM = 16
 const DETAIL_ZOOM = 19
@@ -89,6 +155,8 @@ const POLY_STYLES = {
 }
 const PIPE_DEFAULT = { strokeColor: '#67c23a', strokeWeight: 3, strokeOpacity: 0.75, zIndex: 400 }
 const PIPE_ACTIVE = { strokeColor: '#8B4513', strokeWeight: 6, strokeOpacity: 1, zIndex: 810 }
+const UNIT_PROGRESS_DEFAULT_Z_INDEX = 100
+const UNIT_PROGRESS_ACTIVE_Z_INDEX = 3000
 
 function htmlElement(className: string, html: string): HTMLElement {
   const el = document.createElement('div')
@@ -225,8 +293,17 @@ function bindFacility(kind: FacilityKey, overlay: any, position: [number, number
 function setUnitStyle(id: number, mode: 'default' | 'hover' | 'selected') {
   const polygon = unitPolygons.get(id)
   const progress = unitMarkers.get(id)
+  const progressCircle = unitProgressCircles.get(id)
   const unit = store.units.find((item) => item.id === id)
   if (polygon) polygon.setOptions(POLY_STYLES[mode])
+  if (progressCircle && unit) {
+    if (mode === 'default') {
+      progressCircle.setOptions({ fillColor: STATUS_COLORS[unit.inspection_status] || '#909399' })
+      progressCircle.show()
+    } else {
+      progressCircle.hide()
+    }
+  }
   if (progress && unit) {
     const element = (progress as any).__content as HTMLElement
     const core = element.querySelector<HTMLElement>('.unit-progress-core')
@@ -240,7 +317,7 @@ function setUnitStyle(id: number, mode: 'default' | 'hover' | 'selected') {
         : (STATUS_COLORS[unit.inspection_status] || '#909399'))
     core?.style.setProperty('--progress-border', mode === 'selected' ? '#fdd835' : '#fff')
     if (value) value.textContent = `${Math.round(unit.inspection_progress * 100)}%`
-    progress.setzIndex(mode === 'default' ? 200 : 800)
+    progress.setzIndex(mode === 'default' ? UNIT_PROGRESS_DEFAULT_Z_INDEX : UNIT_PROGRESS_ACTIVE_Z_INDEX)
   }
 }
 
@@ -249,6 +326,7 @@ function renderUnits() {
   clearKind('unit')
   unitPolygons.clear()
   unitMarkers.clear()
+  unitProgressCircles.clear()
 
   store.facilities.units.forEach((source) => {
     if (!source.polyline || source.polyline.length < 3) return
@@ -279,7 +357,20 @@ function renderUnits() {
     unitPolygons.set(unit.id, polygon)
 
     if (source.lng && source.lat) {
-      const progress = marker({ position: [source.lng, source.lat], className: 'unit-progress-marker amap-unit-progress', html: progressHtml(unit), size: [64, 64], zIndex: 200, clickable: false })
+      const progressCircle = new AMapApi.CircleMarker({
+        center: [source.lng, source.lat],
+        radius: 25,
+        strokeColor: '#fff',
+        strokeWeight: 2,
+        strokeOpacity: 1,
+        fillColor: STATUS_COLORS[unit.inspection_status] || '#909399',
+        fillOpacity: 1,
+        zIndex: UNIT_PROGRESS_DEFAULT_Z_INDEX,
+        bubble: true,
+      })
+      add('unit', progressCircle)
+      unitProgressCircles.set(unit.id, progressCircle)
+      const progress = marker({ position: [source.lng, source.lat], className: 'unit-progress-marker amap-unit-progress', html: progressHtml(unit), size: [64, 64], zIndex: UNIT_PROGRESS_DEFAULT_Z_INDEX, clickable: false })
       add('unit', progress)
       unitMarkers.set(unit.id, progress)
     }
@@ -329,8 +420,8 @@ function renderInlets() {
   })
 }
 
-function formatResistance(value: number | null | undefined): string {
-  return value === null || value === undefined ? '—' : `${Number(value).toLocaleString('zh-CN')} MΩ`
+function formatResistance(value: number | null | undefined, unit = 'MΩ'): string {
+  return value === null || value === undefined ? '—' : `${Number(value).toLocaleString('zh-CN')} ${unit}`
 }
 
 function clearInsulationLayer() {
@@ -376,11 +467,11 @@ async function renderInsulation() {
       ? `<div class="insulation-map-photos">${photoViews.join('')}</div>`
       : '<div class="insulation-map-photo-empty">暂无现场照片</div>'
     const bolts = Array.from({ length: 4 }, (_, boltIndex) =>
-      `<div><span>螺栓 ${boltIndex + 1}</span><b>${formatResistance(reading?.bolt_resistances[boltIndex])}</b></div>`,
+      `<div><span>螺栓 ${boltIndex + 1}</span><b>${formatResistance(reading?.bolt_resistances[boltIndex], reading?.bolt_resistance_units[boltIndex])}</b></div>`,
     ).join('')
     const content = htmlElement(
       `insulation-map-marker${complete ? ' is-complete' : ' is-pending'}`,
-      `<div class="insulation-map-card"><header><span>引入口</span><strong>${e(inlet.ecode || inlet.fid)}</strong><i class="${complete ? 'complete' : ''}">${complete ? '数据完整' : '待录入'}</i></header><div class="insulation-map-values">${bolts}<div class="is-flange"><span>上下法兰之间</span><b>${formatResistance(reading?.flange_resistance)}</b></div></div>${photoHtml}</div><div class="insulation-map-pin"><span>${index + 1}</span></div>`,
+      `<div class="insulation-map-card"><header><span>引入口</span><strong>${e(inlet.ecode || inlet.fid)}</strong><i class="${complete ? 'complete' : ''}">${complete ? '数据完整' : '待录入'}</i></header><div class="insulation-map-values">${bolts}<div class="is-flange"><span>上下法兰之间</span><b>${formatResistance(reading?.flange_resistance, reading?.flange_resistance_unit)}</b></div></div>${photoHtml}</div><div class="insulation-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
     const item = new AMapApi.Marker({
@@ -1049,6 +1140,8 @@ defineExpose({ zoomToCommunityView, invalidate })
 
 onMounted(async () => {
   if (!mapRef.value) return
+  mapRef.value.addEventListener('mouseover', handleInspectionPhotoOver)
+  mapRef.value.addEventListener('mouseout', handleInspectionPhotoOut)
   try {
     AMapApi = await loadAMap()
     map = new AMapApi.Map(mapRef.value, {
@@ -1064,7 +1157,6 @@ onMounted(async () => {
     })
     infoWindow = new AMapApi.InfoWindow({ isCustom: true, offset: new AMapApi.Pixel(0, -12), autoMove: false })
     map.addControl(new AMapApi.Scale())
-    map.addControl(new AMapApi.ToolBar({ position: 'RT' }))
     map.on('click', clearAll)
     map.on('zoomend', handleZoomEnd)
     window.addEventListener('themechange', handleThemeChange)
@@ -1165,6 +1257,9 @@ watch(() => store.selectedUnit, (unit) => {
 }, { deep: false })
 
 onBeforeUnmount(() => {
+  mapRef.value?.removeEventListener('mouseover', handleInspectionPhotoOver)
+  mapRef.value?.removeEventListener('mouseout', handleInspectionPhotoOut)
+  removeInspectionPhotoPreview()
   window.removeEventListener('themechange', handleThemeChange)
   window.removeEventListener('insulationdatachange', handleInsulationDataChange)
   window.removeEventListener('soilresistivitydatachange', handleSoilDataChange)

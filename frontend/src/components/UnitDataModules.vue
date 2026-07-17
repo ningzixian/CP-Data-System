@@ -25,7 +25,7 @@ interface ModuleConfig {
 }
 
 const MODULE_CONFIGS: ModuleConfig[] = [
-  { code: 'JOINT_VERIFY', name: '绝缘性能', field: 'insulation_resistance', unit: 'MΩ' },
+  { code: 'JOINT_VERIFY', name: '绝缘性能', field: 'completed_inlet_count' },
   { code: 'SOIL_RESISTIVITY', name: '土壤电阻率', field: 'resistivity', unit: 'Ω·m' },
   { code: 'DC_STRAY_CURRENT', name: '直流杂散电流', field: 'current_density', unit: 'μA/cm²' },
   { code: 'COATING_DETECT', name: '防腐层检测', field: 'damage_count' },
@@ -58,6 +58,25 @@ function hasValue(value: unknown): boolean {
 
 function formatRepresentativeValue(config: ModuleConfig, record?: InspectionRecord): string {
   if (!record) return '未检测'
+
+  if (config.code === 'JOINT_VERIFY') {
+    const readings = Array.isArray(record.result_data?.inlets) ? record.result_data.inlets : []
+    const total = Number(
+      record.result_data?.inlet_count
+      ?? record.result_data?.joint_count
+      ?? readings.length,
+    )
+    const explicitQualified = record.result_data?.qualified_inlet_count
+      ?? record.result_data?.passed_inlet_count
+      ?? record.result_data?.completed_inlet_count
+    const qualified = Number(
+      explicitQualified
+      ?? (readings.length > 0 ? readings.length : record.status === 'passed' ? total : 0),
+    )
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(qualified)) {
+      return `合格 ${Math.max(0, Math.min(qualified, total))}/${total}`
+    }
+  }
 
   if (config.code === 'PIPE_GROUND_POTENTIAL') {
     const average = Number(record.result_data?.natural_potential ?? record.measured_value)

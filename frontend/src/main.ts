@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
@@ -13,6 +14,9 @@ import { applyTheme, getSavedTheme } from './utils/theme'
 applyTheme(getSavedTheme(), false)
 
 const app = createApp(App)
+for (const [name, component] of Object.entries(ElementPlusIconsVue)) {
+  app.component(name, component as any)
+}
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })

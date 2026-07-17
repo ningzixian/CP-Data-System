@@ -9,6 +9,7 @@ import {
   insulationPhotoOwnerKey,
   insulationValues,
   type InletInsulationReading,
+  type InsulationResistanceUnit,
 } from '@/utils/insulation'
 import {
   addInsulationPhotos,
@@ -49,13 +50,16 @@ const metadata = reactive({
 })
 
 const completedCount = computed(() => readings.value.filter(hasCompleteInsulationReading).length)
+const resistanceUnits: InsulationResistanceUnit[] = ['Ω', 'kΩ', 'MΩ']
 
 function emptyReading(inlet: CsvInlet): InletInsulationReading {
   return {
     inlet_id: inlet.fid,
     inlet_code: inlet.ecode || String(inlet.fid),
     bolt_resistances: [null, null, null, null],
+    bolt_resistance_units: ['MΩ', 'MΩ', 'MΩ', 'MΩ'],
     flange_resistance: null,
+    flange_resistance_unit: 'MΩ',
   }
 }
 
@@ -230,9 +234,17 @@ onBeforeUnmount(() => {
             <label v-for="(_, index) in reading.bolt_resistances" :key="index">
               <span>第 {{ index + 1 }} 套螺栓</span>
               <el-input-number v-model="reading.bolt_resistances[index]" :min="0" :precision="3" controls-position="right" />
-              <em>MΩ</em>
+              <el-select v-model="reading.bolt_resistance_units[index]" class="insulation-resistance-unit">
+                <el-option v-for="unit in resistanceUnits" :key="unit" :label="unit" :value="unit" />
+              </el-select>
             </label>
-            <label class="is-wide"><span>上下法兰之间</span><el-input-number v-model="reading.flange_resistance" :min="0" :precision="3" controls-position="right" /><em>MΩ</em></label>
+            <label class="is-wide">
+              <span>上下法兰之间</span>
+              <el-input-number v-model="reading.flange_resistance" :min="0" :precision="3" controls-position="right" />
+              <el-select v-model="reading.flange_resistance_unit" class="insulation-resistance-unit">
+                <el-option v-for="unit in resistanceUnits" :key="unit" :label="unit" :value="unit" />
+              </el-select>
+            </label>
           </div>
 
           <div class="insulation-photo-editor">

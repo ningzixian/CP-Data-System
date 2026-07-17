@@ -8,6 +8,99 @@ html, body, #app {
   color: #303133;
 }
 
+/* feature/new：数据看板、数据管理与智问模块的深色模式兼容。 */
+html.dark .db-header,
+html.dark .db-tabs,
+html.dark .mg-header,
+html.dark .mg-tabs,
+html.dark .stat-card,
+html.dark .kpi-card,
+html.dark .chart-card {
+  background: var(--app-surface-raised) !important;
+  color: var(--app-text);
+  border-color: var(--app-border);
+  box-shadow: var(--app-shadow);
+}
+html.dark .mg-toolbar,
+html.dark .insight-panel { background: var(--app-surface-soft) !important; }
+html.dark .db-title,
+html.dark .mg-title,
+html.dark .chart-title,
+html.dark .stat-value,
+html.dark .kpi-value { color: var(--app-text) !important; }
+html.dark .ctrl-label,
+html.dark .stat-label,
+html.dark .kpi-label,
+html.dark .stat-sub,
+html.dark .kpi-sub { color: var(--app-text-secondary) !important; }
+
+html.dark .zhiwen-page,
+html.dark .report-center {
+  background: var(--app-bg) !important;
+  color: var(--app-text);
+}
+html.dark .zw-header,
+html.dark .zw-card,
+html.dark .zw-welcome,
+html.dark .zw-tab-item.active,
+html.dark .rc-type-card,
+html.dark .rc-params,
+html.dark .rc-preview-toolbar,
+html.dark .rp-toolbar,
+html.dark .rp-meta,
+html.dark .rsp-kpi-card {
+  background: var(--app-surface-raised) !important;
+  color: var(--app-text) !important;
+  border-color: var(--app-border) !important;
+}
+html.dark .zw-tab,
+html.dark .preset-item,
+html.dark .hist-item:hover,
+html.dark .suggestion-card,
+html.dark .zw-hints,
+html.dark .export-meta,
+html.dark .export-col-list,
+html.dark .rsp-summary,
+html.dark .rsp-table th { background: var(--app-surface-soft) !important; }
+html.dark .preset-item:hover,
+html.dark .suggestion-card:hover,
+html.dark .zw-answer,
+html.dark .rsp-meta {
+  background: color-mix(in srgb, var(--app-accent) 14%, var(--app-surface-raised)) !important;
+  border-color: color-mix(in srgb, var(--app-accent) 38%, var(--app-border)) !important;
+}
+html.dark .answer-llm,
+html.dark .rsp-text {
+  background: #362b1d !important;
+  border-color: #76572a !important;
+}
+html.dark .zw-card-title,
+html.dark .hist-q,
+html.dark .zw-suggestions-title,
+html.dark .sug-title,
+html.dark .hint-title,
+html.dark .zw-answer,
+html.dark .zw-map-badge,
+html.dark .rsp-meta,
+html.dark .rsp-summary,
+html.dark .rsp-section-label { color: var(--app-text) !important; }
+html.dark .zw-tab-item,
+html.dark .preset-item,
+html.dark .sug-sub,
+html.dark .zw-hints,
+html.dark .zw-legend,
+html.dark .rsp-subtitle,
+html.dark .rsp-kpi-label,
+html.dark .rsp-text,
+html.dark .rsp-table th,
+html.dark .rsp-table td { color: var(--app-text-secondary) !important; }
+html.dark .zw-map-badge { background: rgba(20, 34, 56, 0.96) !important; }
+html.dark .rsp-table-scroll,
+html.dark .rsp-table th,
+html.dark .rsp-table td { border-color: var(--app-border) !important; }
+/* 报告纸张保持白底，确保预览、打印和 PDF 导出颜色一致。 */
+html.dark .report-paper { color: #303133; }
+
 :root {
   --app-bg: #f5f7fa;
   --app-surface: #ffffff;
@@ -90,7 +183,7 @@ html.dark {
 .appearance-control {
   position: relative;
   height: 56px;
-  margin-left: 4px;
+  margin-left: 20px;
   display: flex;
   align-items: center;
 }
@@ -1090,6 +1183,17 @@ html.dark {
     background-color 0.25s ease,
     border-color 0.25s ease,
     box-shadow 0.25s ease;
+}
+
+/* 默认圆底由矢量 CircleMarker 绘制，确保管线可真实覆盖在圆形上方。 */
+.unit-progress-marker:not(.is-hovered):not(.is-selected) .unit-progress-core {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.unit-progress-marker:not(.is-hovered):not(.is-selected) .unit-progress-value {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
 }
 
 .unit-progress-marker.is-hovered .unit-progress-core,
@@ -2517,8 +2621,8 @@ html.dark {
 .insulation-inlet-editor {
   padding: 18px;
   display: grid;
-  grid-template-columns: 154px minmax(360px, 1fr) minmax(280px, 0.85fr);
-  gap: 20px;
+  grid-template-columns: 148px minmax(300px, 1fr) minmax(260px, 0.82fr);
+  gap: 16px;
   background: #fff;
 }
 
@@ -2596,22 +2700,30 @@ html.dark {
 .insulation-resistance-grid {
   align-content: center;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 13px 16px;
 }
 
 .insulation-resistance-grid label {
   min-width: 0;
   display: grid;
-  grid-template-columns: 74px minmax(110px, 1fr) 26px;
+  grid-template-columns: 78px minmax(80px, 1fr) 68px;
   align-items: center;
   gap: 7px;
   color: #606b7a;
   font-size: 11px;
 }
 
+.insulation-resistance-grid label > span {
+  white-space: nowrap;
+}
+
 .insulation-resistance-grid .el-input-number {
   width: 100%;
+}
+
+.insulation-resistance-grid .insulation-resistance-unit {
+  width: 68px;
 }
 
 .insulation-resistance-grid label.is-wide {
@@ -2636,11 +2748,17 @@ html.dark {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   color: #344b68;
   font-size: 12px;
 }
 
+.insulation-photo-editor-head strong {
+  min-width: 0;
+}
+
 .insulation-photo-upload {
+  flex: 0 0 auto;
   padding: 6px 10px;
   border: 1px solid #409eff;
   border-radius: 6px;
@@ -2648,6 +2766,8 @@ html.dark {
   color: #337ecc;
   cursor: pointer;
   font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .insulation-photo-upload.saving {
@@ -3078,6 +3198,176 @@ html.dark {
 .inlet-parameter-map-note { margin:4px 10px 7px;padding:5px 7px;border-radius:5px;background:#fdf9fe;color:#88708b;font-size:9px;line-height:1.4; }.inlet-parameter-map-photos { margin:6px 10px 9px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px; }.inlet-parameter-map-photos a { height:42px;overflow:hidden;display:block;border-radius:5px;background:#fae8ff; }.inlet-parameter-map-photos img { width:100%;height:100%;display:block;object-fit:cover;transition:transform .18s ease; }.inlet-parameter-map-photos a:hover img { transform:scale(1.12); }.inlet-parameter-map-photo-empty { margin:6px 10px 9px;padding:6px;border:1px dashed #dfafe5;border-radius:6px;background:#fdf9fe;color:#9e7ca2;font-size:9px;text-align:center; }
 .inlet-parameter-map-pending { padding:7px 10px;display:flex;flex-direction:column;align-items:center;border:1px solid #caa3cf;border-radius:8px;background:rgba(253,249,254,.96); }.inlet-parameter-map-pending strong { overflow:hidden;max-width:100%;color:#7d5b82;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }.inlet-parameter-map-pending span { margin-top:2px;color:#a592a8;font-size:8px; }
 .inlet-parameter-map-pin { height:27px;display:flex;flex-direction:column;align-items:center; }.inlet-parameter-map-pin::before { content:'';width:2px;height:7px;background:#c026d3; }.inlet-parameter-map-pin span { width:27px;height:27px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:3px solid #e879f9;border-radius:50%;background:rgba(253,244,255,.98);color:#a21caf;font-size:14px;font-weight:800;box-shadow:0 3px 8px rgba(162,28,175,.3); }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin::before { background:#a28aa5; }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin span { border-color:#baa0be;background:#faf7fb;color:#826e85; }
+
+/* 七项检测地图卡片：参照管线勘测照片尺寸与自适应悬停预览。 */
+.insulation-map-photos,
+.soil-map-photos,
+.dc-map-photos,
+.coating-map-photos,
+.potential-map-photos,
+.continuity-map-photos,
+.inlet-parameter-map-photos {
+  position: relative;
+  z-index: 2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.insulation-map-photos a,
+.soil-map-photos a,
+.dc-map-photos a,
+.coating-map-photos a,
+.potential-map-photos a,
+.continuity-map-photos a,
+.inlet-parameter-map-photos a {
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.insulation-map-card,
+.soil-map-card,
+.dc-map-card,
+.coating-map-card,
+.potential-map-card,
+.continuity-map-card,
+.inlet-parameter-map-card {
+  overflow: visible;
+}
+
+.insulation-map-photos a,
+.soil-map-photos a,
+.dc-map-photos a,
+.coating-map-photos a,
+.potential-map-photos a,
+.continuity-map-photos a,
+.inlet-parameter-map-photos a {
+  position: relative;
+  z-index: 1;
+  cursor: zoom-in;
+  transition: z-index 0s linear 0.18s;
+}
+
+.insulation-map-photos a:hover img,
+.soil-map-photos a:hover img,
+.dc-map-photos a:hover img,
+.coating-map-photos a:hover img,
+.potential-map-photos a:hover img,
+.continuity-map-photos a:hover img,
+.inlet-parameter-map-photos a:hover img {
+  transform: none;
+}
+
+.inspection-photo-page-preview {
+  position: fixed;
+  z-index: 2147483647;
+  height: auto;
+  display: block;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
+  object-fit: contain;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.4);
+  transform-origin: center;
+  transition: opacity 0.08s ease, transform 0.2s ease;
+}
+
+.inspection-photo-page-preview.is-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 七项检测信息卡片的文字统一略微放大。 */
+.insulation-map-card header span,
+.soil-map-card header span,
+.dc-map-card header span,
+.coating-map-card header span,
+.potential-map-card header span,
+.continuity-map-card header span,
+.inlet-parameter-map-card header span,
+.insulation-map-card header i,
+.soil-map-card header i,
+.dc-map-card header i,
+.coating-map-card header i,
+.potential-map-card header i,
+.continuity-map-card header i,
+.inlet-parameter-map-card header i {
+  font-size: 10px;
+}
+
+.insulation-map-card header strong,
+.soil-map-card header strong,
+.dc-map-card header strong,
+.coating-map-card header strong,
+.potential-map-card header strong,
+.continuity-map-card header strong,
+.inlet-parameter-map-card header strong {
+  font-size: 14px;
+}
+
+.insulation-map-values span,
+.soil-map-values span,
+.soil-map-coords,
+.dc-map-stats > span,
+.dc-map-readings > div,
+.dc-map-coords,
+.coating-map-values > div,
+.coating-map-coords,
+.potential-map-values > div,
+.continuity-map-values > div,
+.continuity-map-coords,
+.inlet-parameter-map-values > div {
+  font-size: 10px;
+}
+
+.insulation-map-values b,
+.soil-map-values b,
+.dc-map-stats b,
+.dc-map-readings b,
+.coating-map-values b,
+.potential-map-values b,
+.continuity-map-values b,
+.inlet-parameter-map-values b {
+  font-size: 11px;
+}
+
+.soil-map-primary span,
+.dc-map-primary span,
+.potential-map-primary span,
+.continuity-map-primary span,
+.inlet-parameter-map-primary span {
+  font-size: 11px;
+}
+
+.soil-map-primary b,
+.dc-map-primary b {
+  font-size: 18px;
+}
+
+.potential-map-primary b,
+.continuity-map-primary b,
+.inlet-parameter-map-primary b {
+  font-size: 21px;
+}
+
+.coating-map-location {
+  font-size: 12px;
+}
+
+.potential-map-note,
+.continuity-map-note,
+.inlet-parameter-map-note {
+  font-size: 10px;
+}
+
+.inlet-parameter-map-readings span {
+  font-size: 9px;
+}
+
+.inlet-parameter-map-readings b {
+  font-size: 10px;
+}
 
 .unit-data-module-status { position:absolute; top:7px; right:8px; padding:1px 5px; border-radius:8px; background:#fee2e2; color:#dc2626; font-size:9px; font-weight:700; line-height:15px; }
 .unit-data-module.is-exception { border-color:rgba(239,68,68,.45); }
@@ -3925,7 +4215,7 @@ html.dark .inlet-parameter-map-card { border-color:#74407c;background:rgba(43,21
 
 @media (max-width: 1200px) {
   .insulation-inlet-editor {
-    grid-template-columns: 140px minmax(330px, 1fr);
+    grid-template-columns: 140px minmax(280px, 1fr);
   }
   .insulation-photo-editor {
     grid-column: 1 / -1;
@@ -3935,6 +4225,18 @@ html.dark .inlet-parameter-map-card { border-color:#74407c;background:rgba(43,21
   }
   .soil-photo-editor {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  .insulation-inlet-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .insulation-flange-diagram {
+    min-height: 190px;
+  }
+  .insulation-photo-editor {
+    grid-column: auto;
   }
 }
 
