@@ -26,7 +26,7 @@ onMounted(async () => {
       管线勘测
     </div>
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'dashboard' }" @click="router.push('/dashboard')">
-      进度看板
+      数据看板
     </div>
     <div class="nav-btn" :class="{ active: router.currentRoute.value.name === 'manage' }" @click="router.push('/manage')">
       数据管理

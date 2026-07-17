@@ -126,11 +126,10 @@ function loadLegacyStorage(): Persisted {
     if (raw) {
       const persisted = JSON.parse(raw) as Persisted
       // 兼容短暂使用过的错误类型名“regulator”，统一迁移为绝缘接头。
-      persisted.points = persisted.points.map((point) =>
-        (point as SurveyPoint & { type: string }).type === 'regulator'
-          ? { ...point, type: 'joint' as const }
-          : point,
-      )
+      persisted.points = persisted.points.map((point) => {
+        const t = (point as unknown as { type: string }).type
+        return t === 'regulator' ? { ...point, type: 'joint' as const } : point
+      })
       return persisted
     }
   } catch (error) {
@@ -159,7 +158,7 @@ function normalizePoint(point: SurveyPoint): SurveyPoint {
 function normalizeState(state: Persisted | SurveyDatabaseState): SurveyDatabaseState {
   const pointMap = new Map<string, SurveyPoint>()
   state.points.forEach((rawPoint) => {
-    const rawType = (rawPoint as SurveyPoint & { type: string }).type
+    const rawType = (rawPoint as unknown as { type: string }).type
     const point = normalizePoint(rawType === 'regulator' ? { ...rawPoint, type: 'joint' as const } : rawPoint)
     if (!pointMap.has(point.id)) pointMap.set(point.id, point)
   })

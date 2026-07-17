@@ -182,9 +182,9 @@ function matchCommunity(text: string): string | null {
   return null
 }
 
-function matchDataset(text: string): keyof typeof DATASET_KEYWORDS | null {
+function matchDataset(text: string): string {
   for (const k of Object.keys(DATASET_KEYWORDS)) {
-    if (DATASET_KEYWORDS[k].test(text)) return k as any
+    if (DATASET_KEYWORDS[k].test(text)) return k
   }
   return 'pipes'  // 默认
 }
@@ -771,7 +771,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
           : { headers: ['Fid', '小区', '压力'], rows: rows.slice(0, 50).map((r: any) => ({
               Fid: r.fid, 小区: r.community, 压力: r.pressured || '-',
             })) },
-      mapDataset: (['pipes','inlets','controls','joints','regulators'] as any).includes(dataset) ? dataset : undefined,
+      mapDataset: (['pipes','inlets','controls','joints','regulators'] as readonly string[]).includes(dataset) ? (dataset as 'pipes' | 'inlets' | 'controls' | 'joints' | 'regulators') : undefined,
       mapCommunity: matchCommunity(q) || undefined,
       sql,
     }
@@ -779,17 +779,18 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
 
   // 2) 长度求和（管线专属）
   if (dataset === 'pipes' && (isSumIntent(q) || /总长|长度/.test(q))) {
-    const total = rows.reduce((s, r: any) => s + toNumber(r.length), 0)
-    const avg = rows.length ? total / rows.length : 0
-    const max = rows.reduce((m, r: any) => Math.max(m, toNumber(r.length)), 0)
+    const typedRows: any[] = rows
+    const total = typedRows.reduce((s: number, r: any) => s + toNumber(r.length), 0)
+    const avg = typedRows.length ? total / typedRows.length : 0
+    const max = typedRows.reduce((m: number, r: any) => Math.max(m, toNumber(r.length)), 0)
     sql += ` | 聚合: SUM(长度) = ${total.toFixed(2)}m, AVG = ${avg.toFixed(2)}m, MAX = ${max.toFixed(2)}m`
     return {
-      text: `${datasetLabel}${filterDesc}共 **${rows.length}** 条，总长度 **${total.toFixed(2)} 米**（平均 ${avg.toFixed(2)} m/段，最长 ${max.toFixed(2)} m）。`,
-      totalCount: rows.length,
+      text: `${datasetLabel}${filterDesc}共 **${typedRows.length}** 条，总长度 **${total.toFixed(2)} 米**（平均 ${avg.toFixed(2)} m/段，最长 ${max.toFixed(2)} m）。`,
+      totalCount: typedRows.length,
       table: {
         headers: ['指标', '值'],
         rows: [
-          { 指标: '段数', 值: rows.length },
+          { 指标: '段数', 值: typedRows.length },
           { 指标: '总长度(m)', 值: total.toFixed(2) },
           { 指标: '平均长度(m)', 值: avg.toFixed(2) },
           { 指标: '最长段(m)', 值: max.toFixed(2) },
@@ -800,7 +801,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         title: '各管径管线长度',
         xField: 'name',
         yField: 'value',
-        data: sumByField(rows as any[], 'diametero', 'length'),
+        data: sumByField(typedRows, 'diametero', 'length'),
       },
       mapDataset: 'pipes',
       mapCommunity: matchCommunity(q) || undefined,
@@ -811,8 +812,8 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
   // 3) 平均/最大/最小
   if (dataset === 'records' && (isAvgIntent(q) || isMaxMinIntent(q) || isSumIntent(q))) {
     const op = isMaxMinIntent(q)
-    const numericRows = rows.filter((r: any) => r.measured_value !== undefined && r.measured_value !== null)
-    const values = numericRows.map((r: any) => toNumber(r.measured_value))
+    const numericRows: any[] = rows.filter((r: any) => r.measured_value !== undefined && r.measured_value !== null)
+    const values: number[] = numericRows.map((r: any) => toNumber(r.measured_value))
     if (values.length === 0) {
       sql += ` | 聚合: 无可用数值`
       return {
@@ -825,16 +826,16 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
     if (op === 'max') { v = Math.max(...values); label = '最大值' }
     else if (op === 'min') { v = Math.min(...values); label = '最小值' }
     else if (isSumIntent(q)) { v = values.reduce((s, x) => s + x, 0); label = '合计' }
-    else { v = values.reduce((s, x) => s + x, 0) / values.length; label = '平均值' }
+    else { v = values.reduce((s: number, x: number) => s + x, 0) / values.length; label = '平均值' }
     sql += ` | 聚合: ${label}(测量值) = ${v.toFixed(3)}`
     return {
-      text: `${datasetLabel}${filterDesc}共 **${numericRows.length}** 条有测量值的数据，**${label} = ${v.toFixed(3)}** ${rows[0]?.unit || ''}。`,
+      text: `${datasetLabel}${filterDesc}共 **${numericRows.length}** 条有测量值的数据，**${label} = ${v.toFixed(3)}** ${(numericRows[0] as any)?.unit || ''}。`,
       totalCount: numericRows.length,
       table: {
         headers: ['指标', '值'],
         rows: [
           { 指标: '样本数', 值: numericRows.length },
-          { 指标: `${label}${rows[0]?.unit ? '(' + rows[0].unit + ')' : ''}`, 值: v.toFixed(3) },
+          { 指标: `${label}${(numericRows[0] as any)?.unit ? '(' + (numericRows[0] as any).unit + ')' : ''}`, 值: v.toFixed(3) },
           { 指标: '最大', 值: Math.max(...values).toFixed(3) },
           { 指标: '最小', 值: Math.min(...values).toFixed(3) },
         ],
@@ -887,15 +888,15 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
       table: {
         headers: ['小区', '总数', '完成', '进行中', '异常', '待开始', '完成率'],
         rows: grouped.map((g) => ({
-          小区: g.name, ...g.value, 完成率: g.总数 ? `${((g.value.完成 / g.总数) * 100).toFixed(0)}%` : '-' },
-        )),
+          小区: g.name, ...g.value, 完成率: g.value.总数 ? `${((g.value.完成 / g.value.总数) * 100).toFixed(0)}%` : '-',
+        })),
       },
       chart: {
         type: 'bar',
         title: '各小区腐控单元状态',
         xField: 'name',
         yField: 'value',
-        data: grouped.map((g) => ({ name: g.name, value: g.总数 })),
+        data: grouped.map((g) => ({ name: g.name, value: g.value.总数 })),
       },
       sql,
     }
@@ -915,7 +916,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
       table: {
         headers: ['检测项', '总数', '通过', '异常', '待开始', '通过率'],
         rows: grouped.map((g) => ({
-          检测项: g.name, ...g.value, 通过率: g.总数 ? `${((g.value.通过 / g.总数) * 100).toFixed(0)}%` : '-',
+          检测项: g.name, ...g.value, 通过率: g.value.总数 ? `${((g.value.通过 / g.value.总数) * 100).toFixed(0)}%` : '-',
         })),
       },
       chart: {
@@ -958,7 +959,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
           yField: 'value',
           data: grouped.map((g) => ({ name: g.name, value: g.value })),
         },
-        mapDataset: (['pipes','inlets','controls','joints','regulators'] as any).includes(dataset) ? dataset : undefined,
+        mapDataset: (['pipes','inlets','controls','joints','regulators'] as readonly string[]).includes(dataset) ? (dataset as 'pipes' | 'inlets' | 'controls' | 'joints' | 'regulators') : undefined,
         mapCommunity: matchCommunity(q) || undefined,
         sql,
       }
@@ -987,7 +988,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
             : { headers: ['Fid', '小区', '经度', '纬度'], rows: rows.slice(0, 50).map((r: any) => ({
                 Fid: r.fid, 小区: r.community, 经度: r.lng, 纬度: r.lat,
               })) },
-      mapDataset: (['pipes','inlets','controls','joints','regulators'] as any).includes(dataset) ? dataset : undefined,
+      mapDataset: (['pipes','inlets','controls','joints','regulators'] as readonly string[]).includes(dataset) ? (dataset as 'pipes' | 'inlets' | 'controls' | 'joints' | 'regulators') : undefined,
       mapCommunity: matchCommunity(q) || undefined,
       sql,
     }

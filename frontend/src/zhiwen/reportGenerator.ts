@@ -53,7 +53,7 @@ export interface ReportOptions {
 
 // ============== 工具函数 ==============
 
-function filterByCommunity<T extends { community: string }>(rows: T[], community?: string): T[] {
+function filterByCommunity<T extends { community?: string }>(rows: T[], community?: string): T[] {
   if (!community || community === '全部' || community === 'all') return rows
   return rows.filter((r) => r.community === community)
 }
@@ -545,7 +545,7 @@ function buildProgress(d: ZhiwenData, opts: ReportOptions): Report {
         小区: u.community,
         进度: (u.inspection_progress * 100).toFixed(0) + '%',
         状态: u.inspection_status,
-        最近检测时间: u.last_inspection_at ? new Date(u.last_inspection_at).toLocaleDateString('zh-CN') : '-',
+        最近检测时间: (u as any).last_inspection_at ? new Date((u as any).last_inspection_at).toLocaleDateString('zh-CN') : '-',
       })) },
     ],
     [
@@ -626,7 +626,7 @@ function buildInspection(d: ZhiwenData, opts: ReportOptions): Report {
         单位: r.unit || '-',
         检测员: r.inspector || '-',
         检测时间: r.inspection_date ? new Date(r.inspection_date).toLocaleDateString('zh-CN') : '-',
-        备注: r.result_summary || '-',
+        备注: (r as any).result_summary || '-',
       })) },
     ],
     [

@@ -185,8 +185,10 @@ async function ask(q?: string) {
     if (history.value.length > 20) history.value.pop()
     question.value = q ? text : question.value
     await nextTick()
-    renderChart(result.value.chart)
-    renderMap(result.value)
+    if (result.value) {
+      renderChart(result.value.chart)
+      renderMap(result.value)
+    }
   } catch (e) {
     console.error(e)
     ElMessage.error('查询失败：' + (e as Error).message)
@@ -1024,7 +1026,11 @@ function renderText(text: string) {
           <div class="zw-map-wrap">
             <div v-if="result && result.mapDataset" class="zw-map-badge">
               <span class="dot"></span>
-              <span>当前查询：{{ result.mapDataset }} {{ result.mapCommunity ? '(' + result.mapCommunity.replace('南海家园', '') + ')' : '（全小区）' }}{{ (result.mapOverlay?.length || 0) > 0 ? ' · 标注 ' + result.mapOverlay.length + ' 个点' : '' }}</span>
+              <span>当前查询：{{ result.mapDataset }} {{ result.mapCommunity ? '(' + result.mapCommunity.replace('南海家园', '') + ')' : '（全小区）' }}{{ result.mapOverlay?.length ? ' · 标注 ' + result.mapOverlay.length + ' 个点' : '' }}</span>
+            </div>
+            <div v-else-if="result" class="zw-map-badge">
+              <span class="dot"></span>
+              <span>当前查询：综合查询（全小区）</span>
             </div>
             <div ref="mapRef" class="zw-map" />
           </div>
