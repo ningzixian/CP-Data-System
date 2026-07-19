@@ -3199,7 +3199,69 @@ html.dark {
 .inlet-parameter-map-pending { padding:7px 10px;display:flex;flex-direction:column;align-items:center;border:1px solid #caa3cf;border-radius:8px;background:rgba(253,249,254,.96); }.inlet-parameter-map-pending strong { overflow:hidden;max-width:100%;color:#7d5b82;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }.inlet-parameter-map-pending span { margin-top:2px;color:#a592a8;font-size:8px; }
 .inlet-parameter-map-pin { height:27px;display:flex;flex-direction:column;align-items:center; }.inlet-parameter-map-pin::before { content:'';width:2px;height:7px;background:#c026d3; }.inlet-parameter-map-pin span { width:27px;height:27px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:3px solid #e879f9;border-radius:50%;background:rgba(253,244,255,.98);color:#a21caf;font-size:14px;font-weight:800;box-shadow:0 3px 8px rgba(162,28,175,.3); }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin::before { background:#a28aa5; }.inlet-parameter-map-marker.is-pending .inlet-parameter-map-pin span { border-color:#baa0be;background:#faf7fb;color:#826e85; }
 
+/* 七项检测卡片的坐标标识统一为圆形。外层不能限制高度，否则 flex 会把圆纵向压扁。 */
+.insulation-map-pin,
+.soil-map-pin,
+.dc-map-pin,
+.coating-map-pin,
+.potential-map-pin,
+.continuity-map-pin,
+.inlet-parameter-map-pin {
+  height: auto;
+}
+
+.insulation-map-pin::before,
+.soil-map-pin::before,
+.dc-map-pin::before,
+.coating-map-pin::before,
+.potential-map-pin::before,
+.continuity-map-pin::before,
+.inlet-parameter-map-pin::before {
+  flex: 0 0 8px;
+  height: 8px;
+}
+
+.insulation-map-pin span,
+.soil-map-pin span,
+.dc-map-pin span,
+.coating-map-pin span,
+.potential-map-pin span,
+.continuity-map-pin span,
+.inlet-parameter-map-pin span {
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  flex: 0 0 28px;
+  border-radius: 50%;
+}
+
+/* 悬停只增强阴影，不再把编号圆从原始设施坐标向上移动。 */
+.insulation-map-marker:hover,
+.soil-map-marker:hover,
+.dc-map-marker:hover,
+.coating-map-marker:hover,
+.potential-map-marker:hover,
+.continuity-map-marker:hover,
+.inlet-parameter-map-marker:hover {
+  transform: none;
+}
+
 /* 七项检测地图卡片：参照管线勘测照片尺寸与自适应悬停预览。 */
+.insulation-map-marker,
+.soil-map-marker,
+.dc-map-marker,
+.coating-map-marker,
+.potential-map-marker,
+.continuity-map-marker,
+.inlet-parameter-map-marker {
+  animation: data-module-card-enter 0.28s ease-out both;
+}
+
+@keyframes data-module-card-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .insulation-map-photos,
 .soil-map-photos,
 .dc-map-photos,

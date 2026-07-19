@@ -60,6 +60,25 @@ function handleThemeChange() {
 const overlays: Record<FacilityKey | 'community' | 'insulation' | 'soil' | 'dcStray' | 'coating' | 'potential' | 'continuity' | 'inletParameter', any[]> = {
   unit: [], pipe: [], joint: [], regulator: [], inlet: [], community: [], insulation: [], soil: [], dcStray: [], coating: [], potential: [], continuity: [], inletParameter: [],
 }
+type DataModuleOverlayKey = 'insulation' | 'soil' | 'dcStray' | 'coating' | 'potential' | 'continuity' | 'inletParameter'
+const DATA_MODULE_OVERLAY_KEYS: Partial<Record<InspectionItemCode, DataModuleOverlayKey>> = {
+  JOINT_VERIFY: 'insulation',
+  SOIL_RESISTIVITY: 'soil',
+  DC_STRAY_CURRENT: 'dcStray',
+  COATING_DETECT: 'coating',
+  PIPE_GROUND_POTENTIAL: 'potential',
+  ELECTRIC_CONTINUITY: 'continuity',
+  INLET_PARAM: 'inletParameter',
+}
+const DATA_MODULE_MARKER_SELECTORS: Record<DataModuleOverlayKey, string> = {
+  insulation: '.insulation-map-marker',
+  soil: '.soil-map-marker',
+  dcStray: '.dc-map-marker',
+  coating: '.coating-map-marker',
+  potential: '.potential-map-marker',
+  continuity: '.continuity-map-marker',
+  inletParameter: '.inlet-parameter-map-marker',
+}
 const unitPolygons = new Map<number, any>()
 const unitMarkers = new Map<number, any>()
 const unitProgressCircles = new Map<number, any>()
@@ -77,6 +96,7 @@ const continuityPhotoUrls = new Set<string>()
 let continuityRenderSequence = 0
 const inletParameterPhotoUrls = new Set<string>()
 let inletParameterRenderSequence = 0
+let dataModuleFitSequence = 0
 
 const inspectionPhotoSelector = [
   '.insulation-map-photos img',
@@ -290,6 +310,12 @@ function bindFacility(kind: FacilityKey, overlay: any, position: [number, number
   overlay.on('click', () => selectFacility(kind, overlay))
 }
 
+function shouldShowUnitLayer() {
+  if (isCommunityView) return false
+  if (props.activeDataModule && DATA_MODULE_OVERLAY_KEYS[props.activeDataModule]) return true
+  return props.visibility.unit
+}
+
 function setUnitStyle(id: number, mode: 'default' | 'hover' | 'selected') {
   const polygon = unitPolygons.get(id)
   const progress = unitMarkers.get(id)
@@ -297,7 +323,7 @@ function setUnitStyle(id: number, mode: 'default' | 'hover' | 'selected') {
   const unit = store.units.find((item) => item.id === id)
   if (polygon) polygon.setOptions(POLY_STYLES[mode])
   if (progressCircle && unit) {
-    if (mode === 'default') {
+    if (mode === 'default' && shouldShowUnitLayer()) {
       progressCircle.setOptions({ fillColor: STATUS_COLORS[unit.inspection_status] || '#909399' })
       progressCircle.show()
     } else {
@@ -478,7 +504,8 @@ async function renderInsulation() {
       position: [inlet.lng, inlet.lat],
       content,
       anchor: 'bottom-center',
-      offset: new AMapApi.Pixel(0, -4),
+      // 编号圆直径为 28px；向下偏移半径，使圆心与原始引入口坐标重合。
+      offset: new AMapApi.Pixel(0, 14),
       zIndex: 900 + index,
       clickable: true,
       bubble: false,
@@ -551,7 +578,7 @@ async function renderSoilResistivity() {
       position: [point.lng, point.lat],
       content,
       anchor: 'bottom-center',
-      offset: new AMapApi.Pixel(0, -4),
+      offset: new AMapApi.Pixel(0, 14),
       zIndex: 950 + index,
       clickable: true,
       bubble: false,
@@ -611,7 +638,7 @@ async function renderDcStrayCurrent() {
       `<div class="dc-map-card"><header><span>直流监测</span><strong>${e(point.name)}</strong><i>${complete ? '数据完整' : '待录入'}</i></header><div class="dc-map-primary"><span>平均管地电位</span><b>${formatSoilValue(point.average_potential, 'V')}</b></div><div class="dc-map-stats"><span>范围 <b>${formatSoilValue(point.min_potential, 'V')} ～ ${formatSoilValue(point.max_potential, 'V')}</b></span><span>波动 <b>${formatSoilValue(point.potential_fluctuation, 'mV')}</b></span><span>参比电极 <b>${e(point.reference_electrode)}</b></span></div><div class="dc-map-readings">${readings}</div><div class="dc-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div><div class="dc-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: 970 + index, clickable: true, bubble: false })
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: 970 + index, clickable: true, bubble: false })
     content.addEventListener('mouseenter', () => item.setzIndex?.(1900))
     content.addEventListener('mouseleave', () => item.setzIndex?.(970 + index))
     add('dcStray', item)
@@ -666,7 +693,7 @@ async function renderCoatingDamage() {
       `<div class="coating-map-card"><header><span>${e(point.building || '破损点')}</span><strong>${e(point.name)}</strong><i>${e(point.severity)}</i></header><div class="coating-map-location">${e(point.location_desc || '参考位置待补录')}</div><div class="coating-map-values"><div><span>埋深</span><b>${formatSoilValue(point.buried_depth, 'm')}</b></div><div><span>泄漏电位</span><b>${formatSoilValue(point.leakage_potential, 'mV')}</b></div><div><span>地表</span><b>${e(point.surface || '—')}</b></div><div><span>原始坐标</span><b>${formatSoilValue(point.source_x)}, ${formatSoilValue(point.source_y)}</b></div></div><div class="coating-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div><div class="coating-map-pin" aria-label="防腐层破损点"><span>×</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: 990 + index, clickable: true, bubble: false })
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: 990 + index, clickable: true, bubble: false })
     content.addEventListener('mouseenter', () => item.setzIndex?.(1950))
     content.addEventListener('mouseleave', () => item.setzIndex?.(990 + index))
     add('coating', item)
@@ -728,7 +755,7 @@ async function renderPipeGroundPotential() {
     )
     content.addEventListener('click', (event) => event.stopPropagation())
     const restingZIndex = complete ? 1650 : 1010 + index
-    const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: restingZIndex, clickable: true, bubble: false })
+    const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
     content.addEventListener('mouseenter', () => item.setzIndex?.(2050))
     content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
     add('potential', item)
@@ -789,7 +816,7 @@ async function renderElectricContinuity() {
     )
     content.addEventListener('click', (event) => event.stopPropagation())
     const restingZIndex = complete ? 1660 : 1020 + index
-    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: restingZIndex, clickable: true, bubble: false })
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
     content.addEventListener('mouseenter', () => item.setzIndex?.(2060))
     content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
     add('continuity', item)
@@ -840,7 +867,7 @@ async function renderInletParameters() {
     const content = htmlElement(`inlet-parameter-map-marker${complete ? ' is-complete' : ' is-pending'}`, `${cardHtml}<div class="inlet-parameter-map-pin"><span>Ø</span></div>`)
     content.addEventListener('click', (event) => event.stopPropagation())
     const restingZIndex = complete ? 1670 : 1030 + index
-    const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, -4), zIndex: restingZIndex, clickable: true, bubble: false })
+    const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
     content.addEventListener('mouseenter', () => item.setzIndex?.(2070)); content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
     add('inletParameter', item)
   })
@@ -1070,7 +1097,7 @@ function applyVisibility() {
     setShown('inletParameter', true)
     return
   }
-  ;(['unit', 'pipe', 'joint', 'regulator', 'inlet'] as FacilityKey[]).forEach((kind) => setShown(kind, props.visibility[kind]))
+  (['unit', 'pipe', 'joint', 'regulator', 'inlet'] as FacilityKey[]).forEach((kind) => setShown(kind, props.visibility[kind]))
   setShown('insulation', false)
   setShown('soil', false)
   setShown('dcStray', false)
@@ -1105,6 +1132,37 @@ function fitToAll() {
   if (candidates.length) map.setFitView(candidates, false, [60, 60, 60, 60], 16)
 }
 
+/** 根据当前数据模块实际渲染的点位调整视野，并为顶部方块与信息卡预留空间。 */
+function fitActiveDataModule() {
+  if (!map || !props.activeDataModule) return
+  const code = props.activeDataModule
+  const kind = DATA_MODULE_OVERLAY_KEYS[code]
+  const candidates = kind ? overlays[kind] : []
+  if (!kind || !candidates.length) return
+  const sequence = ++dataModuleFitSequence
+
+  // Wait until the new module cards have completed layout, then perform exactly one animated view change.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (sequence !== dataModuleFitSequence || !map || !mapRef.value || props.activeDataModule !== code) return
+    const mapRect = mapRef.value.getBoundingClientRect()
+    const moduleDeck = document.querySelector<HTMLElement>('.unit-data-modules.visible')
+    const deckRect = moduleDeck?.getBoundingClientRect()
+    const cards = [...mapRef.value.querySelectorAll<HTMLElement>(DATA_MODULE_MARKER_SELECTORS[kind])]
+    const maxCardWidth = Math.max(0, ...cards.map((card) => card.getBoundingClientRect().width))
+    const maxCardHeight = Math.max(0, ...cards.map((card) => card.getBoundingClientRect().height))
+    const deckBottom = deckRect ? Math.max(0, deckRect.bottom - mapRect.top + 14) : 16
+    const padding = [
+      Math.ceil(deckBottom + maxCardHeight),
+      46,
+      Math.ceil(maxCardWidth / 2 + 18),
+      Math.ceil(maxCardWidth / 2 + 18),
+    ]
+
+    // No minimum zoom clamp: setFitView may zoom out as needed to keep every card inside the map panel.
+    map.setFitView(candidates, false, padding, candidates.length === 1 ? DETAIL_ZOOM : MAX_ZOOM)
+  }))
+}
+
 function renderAll() {
   if (!map || !store.facilities) return
   clearFacilitySelection()
@@ -1136,7 +1194,7 @@ function invalidate() {
   map?.resize?.()
 }
 
-defineExpose({ zoomToCommunityView, invalidate })
+defineExpose({ zoomToCommunityView, invalidate, fitActiveDataModule })
 
 onMounted(async () => {
   if (!mapRef.value) return
@@ -1182,15 +1240,20 @@ watch(() => props.visibility, applyVisibility, { deep: true })
 watch(() => props.dataModuleMode, (active) => {
   if (active) clearFacilitySelection()
 })
-watch(() => props.activeDataModule, () => {
+watch(() => props.activeDataModule, async (code) => {
+  // Invalidate any pending double-rAF fit from a previously selected module.
+  dataModuleFitSequence++
   applyVisibility()
-  void renderInsulation()
-  void renderSoilResistivity()
-  void renderDcStrayCurrent()
-  void renderCoatingDamage()
-  void renderPipeGroundPotential()
-  void renderElectricContinuity()
-  void renderInletParameters()
+  await Promise.all([
+    renderInsulation(),
+    renderSoilResistivity(),
+    renderDcStrayCurrent(),
+    renderCoatingDamage(),
+    renderPipeGroundPotential(),
+    renderElectricContinuity(),
+    renderInletParameters(),
+  ])
+  if (code && code === props.activeDataModule) fitActiveDataModule()
 })
 watch(
   () => store.records.filter((record) => record.item_code === 'JOINT_VERIFY').map((record) => `${record.id}:${record.updated_at}`).join(','),

@@ -268,7 +268,12 @@ function returnToUnitCard() {
 
 /** 数据模块点击预留接口：后续可按检测项目编码打开对应的数据视图。 */
 function onDataModuleSelect(code: InspectionItemCode) {
-  activeDataModule.value = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' || code === 'ELECTRIC_CONTINUITY' || code === 'INLET_PARAM' ? code : null
+  const nextCode = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' || code === 'ELECTRIC_CONTINUITY' || code === 'INLET_PARAM' ? code : null
+  if (nextCode && activeDataModule.value === nextCode) {
+    mapRef.value?.fitActiveDataModule()
+    return
+  }
+  activeDataModule.value = nextCode
 }
 
 function clearActiveDataModule() {
@@ -322,6 +327,7 @@ function openInletParameterEditor() {
  *  - 每次 onCommunityFocus 都覆盖(重复点同小区时),保证下一次 watch 触发时能正确消费
  */
 let lastMapClick: string | null = null
+let suppressCommunityCollapseZoom = false
 
 /** 点击地图上的小区大圆 → 展开对应小区（accordion 模式直接覆盖） */
 function onCommunityFocus(name: string) {
@@ -329,15 +335,19 @@ function onCommunityFocus(name: string) {
   communityActive.value = name
 }
 
-/** 地图缩放跨过小区/细节阈值时,合上小区菜单
- *  - 进入小区概览:菜单内容跟地图不匹配(地图是合并大圆,菜单是单个小区的单元),合上避免误导
- *  - 进入细节视图:不动菜单(用户可能在社区大圆点击时手动展开过某个小区)
- *  - 只在菜单非空时清空,避免无意义的 ref 变化触发 watch
- */
+/** 进入小区概览时退出控制单元上下文，确保地图、侧栏和数据模块状态一致。 */
 function onViewModeChange(mode: 'community' | 'detail') {
-  if (mode === 'community' && communityActive.value !== '') {
+  if (mode !== 'community') return
+  lastMapClick = null
+  clearSidebarTimers()
+  if (communityActive.value !== '') {
+    suppressCommunityCollapseZoom = true
     communityActive.value = ''
   }
+  resetDataModuleMode()
+  drawerOpen.value = false
+  if (store.hoveredUnit) store.hoverUnit(null)
+  if (store.selectedUnit) store.selectUnit(null)
 }
 
 /** 菜单变化时联动地图 + 滚动列表:
@@ -356,6 +366,10 @@ watch(communityActive, (newVal, oldVal) => {
     return
   }
   if (!newVal) {
+    if (suppressCommunityCollapseZoom) {
+      suppressCommunityCollapseZoom = false
+      return
+    }
     if (oldVal) {
       // 合上菜单时先让地图缩放,再滚动侧栏,避免两个动画抢主线程
       if (communityZoomScrollTimer !== null) window.clearTimeout(communityZoomScrollTimer)
