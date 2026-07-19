@@ -3246,6 +3246,35 @@ html.dark {
   transform: none;
 }
 
+/* 信息卡恢复悬停反馈；只变换卡片主体，编号圆继续固定在设施坐标。 */
+.insulation-map-card,
+.soil-map-card,
+.dc-map-card,
+.coating-map-card,
+.potential-map-card,
+.continuity-map-card,
+.inlet-parameter-map-card,
+.potential-map-pending,
+.continuity-map-pending,
+.inlet-parameter-map-pending {
+  transform-origin: bottom center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.insulation-map-marker:hover > .insulation-map-card,
+.soil-map-marker:hover > .soil-map-card,
+.dc-map-marker:hover > .dc-map-card,
+.coating-map-marker:hover > .coating-map-card,
+.potential-map-marker:hover > .potential-map-card,
+.continuity-map-marker:hover > .continuity-map-card,
+.inlet-parameter-map-marker:hover > .inlet-parameter-map-card,
+.potential-map-marker:hover > .potential-map-pending,
+.continuity-map-marker:hover > .continuity-map-pending,
+.inlet-parameter-map-marker:hover > .inlet-parameter-map-pending {
+  transform: translateY(-4px) scale(1.018);
+  box-shadow: 0 14px 30px rgba(31, 41, 55, 0.22);
+}
+
 /* 七项检测地图卡片：参照管线勘测照片尺寸与自适应悬停预览。 */
 .insulation-map-marker,
 .soil-map-marker,
