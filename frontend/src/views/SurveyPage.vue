@@ -7,7 +7,7 @@
  *  - view 模式,点击点位 marker 打开编辑浮层(类型/角度/埋深/电流/备注/删除)
  *  - 撤销/重做已就绪
  */
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onActivated, onDeactivated, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCpStore } from '@/stores/cp'
 import { useSurveyStore } from '@/stores/survey'
@@ -181,6 +181,17 @@ onMounted(async () => {
     await store.loadAll()
   }
   await survey.loadPointsFromCsv(SURVEY_CSV_URL)
+})
+
+onActivated(() => {
+  nextTick(() => mapRef.value?.invalidate())
+})
+
+onDeactivated(() => {
+  mode.value = 'view'
+  selectedPointId.value = null
+  editingPointId.value = null
+  mapRef.value?.clearPointInfo()
 })
 </script>
 

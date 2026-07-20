@@ -86,7 +86,9 @@ onBeforeUnmount(() => {
   </div>
   <router-view v-slot="{ Component }">
     <transition name="fade" mode="out-in">
-      <component :is="Component" />
+      <KeepAlive :include="['MapPage', 'SurveyPage']">
+        <component :is="Component" />
+      </KeepAlive>
     </transition>
   </router-view>
 </template>

@@ -94,6 +94,25 @@ const BASE = '/data'
 
 // 坐标合并精度（约 0.1 m），pipe 端点、joint、inlet 坐标对齐到这一步
 const COORD_PRECISION = 6
+const WEB_MERCATOR_LIMIT = 20037508.342789244
+
+/** 边界文件兼容经纬度与 EPSG:3857（Web Mercator）米制坐标。 */
+function normalizeBoundaryCoordinate([x, y]: [number, number]): [number, number] {
+  if (Math.abs(x) <= 180 && Math.abs(y) <= 90) return [x, y]
+  const looksLikeWebMercator = Math.abs(x) > 1_000_000
+    && Math.abs(y) > 1_000_000
+    && Math.abs(x) <= WEB_MERCATOR_LIMIT
+    && Math.abs(y) <= WEB_MERCATOR_LIMIT
+  if (!looksLikeWebMercator) return [x, y]
+  const lng = x / WEB_MERCATOR_LIMIT * 180
+  const mercatorLat = y / WEB_MERCATOR_LIMIT * 180
+  const lat = 180 / Math.PI * (2 * Math.atan(Math.exp(mercatorLat * Math.PI / 180)) - Math.PI / 2)
+  return [lng, lat]
+}
+
+function normalizeBoundaryRings(rings: Array<Array<[number, number]>>) {
+  return rings.map((ring) => ring.map(normalizeBoundaryCoordinate))
+}
 
 /** 加载的小区列表
  *  - 这里列的小区,public/data/ 下必须有对应的 5 份 CSV(命名格式:<小区名>-{低压|引入口_录入|控制单元|绝缘接头|调压箱}.csv)
@@ -219,7 +238,7 @@ async function loadCommunityData(community: string): Promise<{
       .filter((x): x is CsvInlet => !!x)
 
     const boundaryRow = boundaryText ? parseCSV(boundaryText)[0] : undefined
-    const boundaryRings = boundaryRow ? parseWKTPolygon(boundaryRow.WKT) : []
+    const boundaryRings = boundaryRow ? normalizeBoundaryRings(parseWKTPolygon(boundaryRow.WKT)) : []
     const boundary = boundaryRings.length > 0
       ? {
           name: community,

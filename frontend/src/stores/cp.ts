@@ -28,6 +28,8 @@ export const useCpStore = defineStore('cp', () => {
   const items = ref<InspectionItemDef[]>([])
   const loading = ref(false)
   const loadError = ref('')
+  let loaded = false
+  let loadPromise: Promise<void> | null = null
 
   // 现场设施数据（来自 CSV）
   const units = ref<CorrosionUnit[]>([])
@@ -51,45 +53,57 @@ export const useCpStore = defineStore('cp', () => {
    * - 后端联调时（USE_MOCK=false），units/points 由后端 API 返回
    * - mock 模式下，units/points 由 public/data/ 下的 CSV 加载（不需要真实后端）
    */
-  async function loadAll() {
-    loading.value = true
-    loadError.value = ''
+  async function loadAll(force = false) {
+    if (!force && loaded) return
+    if (loadPromise) return loadPromise
+
+    loadPromise = (async () => {
+      loading.value = true
+      loadError.value = ''
+      try {
+        const [fac, p, its, r] = await Promise.all([
+          loadFacilities(),
+          pipelinesApi.list(),
+          fetchItems(),
+          recordsApi.list(),
+        ])
+
+        facilities.value = fac
+        units.value = fac.units
+        pipelines.value = p
+        items.value = its
+        applyRecords(r)
+
+        // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
+        points.value = fac.joints
+          .filter((j) => j.unit_id !== undefined)
+          .map((j): InspectionPoint => ({
+            id: j.fid,
+            unit_id: j.unit_id!,
+            point_type: '绝缘接头',
+            lng: j.lng,
+            lat: j.lat,
+            mileage: 0,
+            bd_coord: '',
+            location_desc: `${j.type}｜${j.pressured}`,
+            created_at: new Date().toISOString(),
+          }))
+
+        if (!USE_MOCK) dashboard.value = await dashboardApi.get()
+        loaded = true
+      } catch (error) {
+        loadError.value = error instanceof Error ? error.message : '数据加载失败'
+        console.error('[CP Store] 数据加载失败：', error)
+        ElMessage.error(`数据加载失败：${loadError.value}`)
+      } finally {
+        loading.value = false
+      }
+    })()
+
     try {
-      const [fac, p, its, r] = await Promise.all([
-        loadFacilities(),
-        pipelinesApi.list(),
-        fetchItems(),
-        recordsApi.list(),
-      ])
-
-      facilities.value = fac
-      units.value = fac.units
-      pipelines.value = p
-      items.value = its
-      applyRecords(r)
-
-      // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
-      points.value = fac.joints
-        .filter((j) => j.unit_id !== undefined)
-        .map((j): InspectionPoint => ({
-          id: j.fid,
-          unit_id: j.unit_id!,
-          point_type: '绝缘接头',
-          lng: j.lng,
-          lat: j.lat,
-          mileage: 0,
-          bd_coord: '',
-          location_desc: `${j.type}｜${j.pressured}`,
-          created_at: new Date().toISOString(),
-        }))
-
-      if (!USE_MOCK) dashboard.value = await dashboardApi.get()
-    } catch (error) {
-      loadError.value = error instanceof Error ? error.message : '数据加载失败'
-      console.error('[CP Store] 数据加载失败：', error)
-      ElMessage.error(`数据加载失败：${loadError.value}`)
+      await loadPromise
     } finally {
-      loading.value = false
+      loadPromise = null
     }
   }
 

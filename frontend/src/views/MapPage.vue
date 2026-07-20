@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onActivated, onBeforeUnmount, onDeactivated } from 'vue'
 import { useCpStore } from '@/stores/cp'
 import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
@@ -270,7 +270,6 @@ function returnToUnitCard() {
 function onDataModuleSelect(code: InspectionItemCode) {
   const nextCode = code === 'JOINT_VERIFY' || code === 'SOIL_RESISTIVITY' || code === 'DC_STRAY_CURRENT' || code === 'COATING_DETECT' || code === 'PIPE_GROUND_POTENTIAL' || code === 'ELECTRIC_CONTINUITY' || code === 'INLET_PARAM' ? code : null
   if (nextCode && activeDataModule.value === nextCode) {
-    mapRef.value?.fitActiveDataModule()
     return
   }
   activeDataModule.value = nextCode
@@ -416,13 +415,20 @@ watch(lastFocusedCommunity, (name) => {
   lastFocusedCommunity.value = ''
 })
 
-onBeforeUnmount(() => {
+function resetPageInteractionState() {
   clearSidebarTimers()
   resetDataModuleMode()
   drawerOpen.value = false
   if (store.hoveredUnit) store.hoverUnit(null)
   if (store.selectedUnit) store.selectUnit(null)
+}
+
+onActivated(() => {
+  nextTick(() => mapRef.value?.invalidate())
 })
+
+onDeactivated(resetPageInteractionState)
+onBeforeUnmount(resetPageInteractionState)
 
 const selectedUnit = computed(() => store.selectedUnit)
 

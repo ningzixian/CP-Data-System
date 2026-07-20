@@ -1193,7 +1193,11 @@ function showPointInfo(id: string) {
   void showSurveyPointTip(point, [point.lng, point.lat], true)
 }
 
-defineExpose({ focusPoint, showPointInfo, clearPointInfo: clearPinnedSurveyPointTip })
+function invalidate() {
+  map?.resize?.()
+}
+
+defineExpose({ focusPoint, showPointInfo, clearPointInfo: clearPinnedSurveyPointTip, invalidate })
 
 const editingPoint = computed(() => props.editingPointId ? props.surveyPoints.find((point) => point.id === props.editingPointId) ?? null : null)
 const editForm = reactive<{ type: SurveyPointType; rotation: number; depth: number | null; current: number | null; note: string }>({ type: 'straight', rotation: 0, depth: null, current: null, note: '' })

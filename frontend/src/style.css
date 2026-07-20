@@ -356,6 +356,48 @@ html.dark {
 
 #map { width: 100%; height: 100%; overflow: hidden; }
 
+/* 数据模块卡片使用独立覆盖层，允许越过地图内部图层并显示在右上编辑工具栏之上。 */
+.data-module-card-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.data-module-card-portal {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+
+.data-module-card-portal > * {
+  width: 100%;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+.data-module-card-portal:hover > * {
+  transform: translateY(-4px) scale(1.018);
+  box-shadow: 0 14px 30px rgba(31, 41, 55, 0.22);
+}
+
+.has-elevated-data-module-card > :is(
+  .insulation-map-card,
+  .soil-map-card,
+  .dc-map-card,
+  .coating-map-card,
+  .potential-map-card,
+  .continuity-map-card,
+  .inlet-parameter-map-card,
+  .potential-map-pending,
+  .continuity-map-pending,
+  .inlet-parameter-map-pending
+) {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .unit-card {
   margin: 12px;
   padding: 14px;
@@ -1212,7 +1254,7 @@ html.dark {
 /* AMap 主地图覆盖物：复用原有图标视觉。 */
 .amap-marker-content .unit-progress-marker,
 .amap-marker-content .amap-facility-marker,
-.amap-marker-content .community-progress-marker,
+/* 已停用：.amap-marker-content .community-progress-marker, */
 .amap-marker-content .community-boundary-info {
   background: transparent !important;
   border: 0 !important;
@@ -1679,51 +1721,30 @@ html.dark {
   font-size: 14px;
 }
 
-/* 小区概览大圆圈出场动效：
- *  - scale 0.3 → 1.05 → 1（轻微回弹）
- *  - opacity 0 → 1
- *  - 通过 inline style 的 animation-delay 实现错位出场（每个圆间隔 120ms）
+/*
+ * 已停用的小区进度球样式，完整保留以便以后恢复。
+ *
+ * @keyframes communityPopIn {
+ *   0% { opacity: 0; transform: scale(0.3); }
+ *   60% { opacity: 1; transform: scale(1.05); }
+ *   100% { opacity: 1; }
+ * }
+ *
+ * .community-progress-marker.community-fading {
+ *   opacity: 0 !important;
+ *   transition: opacity 0.45s ease !important;
+ * }
+ *
+ * .community-progress-marker .community-hover-target {
+ *   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+ *   cursor: pointer;
+ *   transform-origin: center center;
+ * }
+ * .community-progress-marker:hover .community-hover-target {
+ *   transform: scale(1.15);
+ *   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+ * }
  */
-@keyframes communityPopIn {
-  0% {
-    opacity: 0;
-    transform: scale(0.3);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1.05);
-  }
-  100% {
-    opacity: 1;
-    /* 不写 transform,让动画结束后 transform 回到"无"状态(base = scale(1))
-     * 这样 :hover 的 transform: scale(...) 才能正常生效,不会被动画 final keyframe 压住
-     * 视觉上等价于 transform: scale(1)(浏览器把无 transform 当作 scale(1) 处理)
-     */
-  }
-}
-
-/* 小区大圆渐隐：纯透明度过渡，慢慢"消融" */
-.community-progress-marker.community-fading {
-  opacity: 0 !important;
-  transition: opacity 0.45s ease !important;
-}
-
-/* 小区大圆 hover 动效：放大 + 加深阴影
- * 关键架构:外层 .community-anim 跑 communityPopIn 入场动画,内层 .community-hover-target
- * 跑 hover 缩放。两个 transform 分属不同元素,互不干扰:
- *   - 外层 transform 被入场动画"锁住"(fill-mode: both 后的 after phase),但它只管入场
- *   - 内层没有动画,transform 自由受 CSS transition 控制,hover 缩放能正常过渡
- * 不再用 !important,因为不再和动画竞争
- */
-.community-progress-marker .community-hover-target {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  cursor: pointer;
-  transform-origin: center center;
-}
-.community-progress-marker:hover .community-hover-target {
-  transform: scale(1.15);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
 
 .community-boundary {
   cursor: pointer;
@@ -3235,6 +3256,173 @@ html.dark {
   border-radius: 50%;
 }
 
+/*
+ * 同一检测模块超过 3 个点位时，只展开当前聚焦点位的信息卡。
+ * 信息卡脱离普通文档流，地图标记本体始终只有固定高度的点位图标，
+ * 因此卡片切换不会改变锚点尺寸，卡片区域也不会遮挡其他点位的悬停。
+ */
+.data-module-focus-mode {
+  position: relative;
+  width: 28px !important;
+  height: 36px;
+  pointer-events: none;
+}
+
+.insulation-map-marker.data-module-focus-mode { --data-module-card-width: 244px; }
+.soil-map-marker.data-module-focus-mode { --data-module-card-width: 258px; }
+.dc-map-marker.data-module-focus-mode { --data-module-card-width: 272px; }
+.coating-map-marker.data-module-focus-mode { --data-module-card-width: 284px; }
+.potential-map-marker.data-module-focus-mode { --data-module-card-width: 236px; }
+.potential-map-marker.data-module-focus-mode.is-pending { --data-module-card-width: 150px; }
+.continuity-map-marker.data-module-focus-mode { --data-module-card-width: 246px; }
+.continuity-map-marker.data-module-focus-mode.is-pending { --data-module-card-width: 158px; }
+.inlet-parameter-map-marker.data-module-focus-mode { --data-module-card-width: 252px; }
+.inlet-parameter-map-marker.data-module-focus-mode.is-pending { --data-module-card-width: 158px; }
+
+.data-module-focus-mode:not(.is-card-active) {
+  filter: none !important;
+}
+
+.data-module-focus-mode > .insulation-map-pin,
+.data-module-focus-mode > .soil-map-pin,
+.data-module-focus-mode > .dc-map-pin,
+.data-module-focus-mode > .coating-map-pin,
+.data-module-focus-mode > .potential-map-pin,
+.data-module-focus-mode > .continuity-map-pin,
+.data-module-focus-mode > .inlet-parameter-map-pin {
+  pointer-events: none;
+}
+
+.data-module-focus-mode > .insulation-map-pin span,
+.data-module-focus-mode > .soil-map-pin span,
+.data-module-focus-mode > .dc-map-pin span,
+.data-module-focus-mode > .coating-map-pin span,
+.data-module-focus-mode > .potential-map-pin span,
+.data-module-focus-mode > .continuity-map-pin span,
+.data-module-focus-mode > .inlet-parameter-map-pin span {
+  pointer-events: auto;
+  cursor: pointer;
+  transform-origin: center;
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+/* 单卡模式下，非当前点位统一恢复为中性状态，避免与选中颜色混淆。 */
+.data-module-focus-mode:not(.is-card-active) > .insulation-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .soil-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .dc-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .coating-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .potential-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .continuity-map-pin span,
+.data-module-focus-mode:not(.is-card-active) > .inlet-parameter-map-pin span {
+  border-color: #f8fafc;
+  background: #8491a3;
+  color: #fff;
+  box-shadow: 0 2px 7px rgba(51, 65, 85, 0.3);
+  transform: scale(1);
+}
+
+/* 当前信息卡对应的点位使用模块选中色，并保持轻微放大。 */
+.insulation-map-marker.data-module-focus-mode.is-card-active > .insulation-map-pin span {
+  border-color: #93c5fd;
+  background: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(37, 99, 235, 0.55);
+  transform: scale(1.12);
+}
+
+.soil-map-marker.data-module-focus-mode.is-card-active > .soil-map-pin span {
+  border-color: #7dd3c7;
+  background: #087f75;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(15, 139, 128, 0.52);
+  transform: scale(1.12);
+}
+
+.dc-map-marker.data-module-focus-mode.is-card-active > .dc-map-pin span {
+  border-color: #fdba8c;
+  background: #9a3412;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(194, 65, 12, 0.5);
+  transform: scale(1.12);
+}
+
+.coating-map-marker.data-module-focus-mode.is-card-active > .coating-map-pin span {
+  border-color: #fda4af;
+  background: #d9363e;
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(217, 54, 62, 0.52);
+  transform: scale(1.12);
+}
+
+.potential-map-marker.data-module-focus-mode.is-card-active > .potential-map-pin span {
+  border-color: #7dd3fc;
+  background: #0284c7;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(2, 132, 199, 0.5);
+  transform: scale(1.12);
+}
+
+.continuity-map-marker.data-module-focus-mode.is-card-active > .continuity-map-pin span {
+  border-color: #86efac;
+  background: #16a34a;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(22, 163, 74, 0.5);
+  transform: scale(1.12);
+}
+
+.continuity-map-marker.data-module-focus-mode.is-connected.is-card-active > .continuity-map-pin span {
+  border-color: #fca5a5;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(220, 38, 38, 0.5);
+}
+
+.inlet-parameter-map-marker.data-module-focus-mode.is-card-active > .inlet-parameter-map-pin span {
+  border-color: #f0abfc;
+  background: #c026d3;
+  color: #fff;
+  box-shadow: 0 3px 11px rgba(192, 38, 211, 0.48);
+  transform: scale(1.12);
+}
+
+.data-module-focus-mode > .insulation-map-card,
+.data-module-focus-mode > .soil-map-card,
+.data-module-focus-mode > .dc-map-card,
+.data-module-focus-mode > .coating-map-card,
+.data-module-focus-mode > .potential-map-card,
+.data-module-focus-mode > .continuity-map-card,
+.data-module-focus-mode > .inlet-parameter-map-card,
+.data-module-focus-mode > .potential-map-pending,
+.data-module-focus-mode > .continuity-map-pending,
+.data-module-focus-mode > .inlet-parameter-map-pending {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  width: var(--data-module-card-width);
+  box-sizing: border-box;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.data-module-focus-mode :is(a, button) {
+  pointer-events: auto;
+}
+
+.data-module-focus-mode:not(.is-card-active) > .insulation-map-card,
+.data-module-focus-mode:not(.is-card-active) > .soil-map-card,
+.data-module-focus-mode:not(.is-card-active) > .dc-map-card,
+.data-module-focus-mode:not(.is-card-active) > .coating-map-card,
+.data-module-focus-mode:not(.is-card-active) > .potential-map-card,
+.data-module-focus-mode:not(.is-card-active) > .continuity-map-card,
+.data-module-focus-mode:not(.is-card-active) > .inlet-parameter-map-card,
+.data-module-focus-mode:not(.is-card-active) > .potential-map-pending,
+.data-module-focus-mode:not(.is-card-active) > .continuity-map-pending,
+.data-module-focus-mode:not(.is-card-active) > .inlet-parameter-map-pending {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 悬停只增强阴影，不再把编号圆从原始设施坐标向上移动。 */
 .insulation-map-marker:hover,
 .soil-map-marker:hover,
@@ -3273,6 +3461,20 @@ html.dark {
 .inlet-parameter-map-marker:hover > .inlet-parameter-map-pending {
   transform: translateY(-4px) scale(1.018);
   box-shadow: 0 14px 30px rgba(31, 41, 55, 0.22);
+}
+
+/* 聚焦模式的卡片以 28px 点位圆为中心，悬停动效不能覆盖横向居中位移。 */
+.data-module-focus-mode:hover > .insulation-map-card,
+.data-module-focus-mode:hover > .soil-map-card,
+.data-module-focus-mode:hover > .dc-map-card,
+.data-module-focus-mode:hover > .coating-map-card,
+.data-module-focus-mode:hover > .potential-map-card,
+.data-module-focus-mode:hover > .continuity-map-card,
+.data-module-focus-mode:hover > .inlet-parameter-map-card,
+.data-module-focus-mode:hover > .potential-map-pending,
+.data-module-focus-mode:hover > .continuity-map-pending,
+.data-module-focus-mode:hover > .inlet-parameter-map-pending {
+  transform: translateX(-50%) translateY(-4px) scale(1.018);
 }
 
 /* 七项检测地图卡片：参照管线勘测照片尺寸与自适应悬停预览。 */
@@ -3367,6 +3569,193 @@ html.dark {
 .inspection-photo-page-preview.is-visible {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.inspection-photo-more {
+  grid-column: 1 / -1;
+  min-height: 30px;
+  border: 1px solid rgba(50, 133, 120, 0.3);
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(224, 245, 241, 0.96), rgba(211, 237, 233, 0.96));
+  color: #27766b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.inspection-photo-more span {
+  margin-right: 5px;
+  font-size: 14px;
+}
+
+.inspection-photo-more:hover {
+  border-color: rgba(32, 129, 113, 0.58);
+  box-shadow: 0 4px 12px rgba(24, 100, 89, 0.18);
+  transform: translateY(-1px);
+}
+
+.inspection-photo-gallery-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 34px;
+  background: rgba(3, 12, 23, 0.76);
+  backdrop-filter: blur(7px);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.inspection-photo-gallery-overlay.is-visible {
+  opacity: 1;
+}
+
+.inspection-photo-gallery-dialog {
+  width: min(1040px, calc(100vw - 68px));
+  max-height: calc(100vh - 68px);
+  overflow: hidden;
+  border: 1px solid rgba(129, 230, 217, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(17, 40, 51, 0.99), rgba(8, 25, 36, 0.99));
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.52);
+  transform: translateY(12px) scale(0.97);
+  transition: transform 0.22s cubic-bezier(.2, .8, .2, 1);
+}
+
+.inspection-photo-gallery-overlay.is-visible .inspection-photo-gallery-dialog {
+  transform: translateY(0) scale(1);
+}
+
+.inspection-photo-gallery-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 74px;
+  padding: 14px 18px 14px 22px;
+  border-bottom: 1px solid rgba(128, 214, 202, 0.18);
+  background: rgba(24, 65, 67, 0.48);
+}
+
+.inspection-photo-gallery-dialog > header div {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 3px 12px;
+}
+
+.inspection-photo-gallery-dialog > header span {
+  grid-column: 1 / -1;
+  color: #74d7c8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.inspection-photo-gallery-dialog > header strong {
+  color: #effffc;
+  font-size: 18px;
+}
+
+.inspection-photo-gallery-dialog > header small {
+  color: #8eb8b3;
+  font-size: 12px;
+}
+
+.inspection-photo-gallery-dialog > header button {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(148, 214, 205, 0.2);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: #d9f5f0;
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.inspection-photo-gallery-dialog > header button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: rotate(6deg);
+}
+
+.inspection-photo-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+  gap: 14px;
+  max-height: calc(100vh - 176px);
+  padding: 18px;
+  overflow: auto;
+}
+
+.inspection-photo-gallery-grid a {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(122, 211, 198, 0.2);
+  border-radius: 11px;
+  background: #07141e;
+  color: #e8fbf8;
+  text-decoration: none;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.inspection-photo-gallery-grid a:hover {
+  border-color: rgba(105, 230, 210, 0.62);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+  transform: translateY(-2px);
+}
+
+.inspection-photo-gallery-grid img {
+  width: 100%;
+  height: auto;
+  max-height: 54vh;
+  display: block;
+  object-fit: contain;
+}
+
+.inspection-photo-gallery-grid span {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 13px;
+  background: rgba(4, 19, 28, 0.76);
+  color: #8ce6d8;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 25px;
+  text-align: center;
+}
+
+.inspection-photo-gallery-grid b {
+  display: block;
+  overflow: hidden;
+  padding: 9px 11px 10px;
+  color: #cce6e2;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.dark .inspection-photo-more {
+  border-color: rgba(80, 187, 170, 0.32);
+  background: linear-gradient(135deg, rgba(23, 71, 68, 0.96), rgba(17, 54, 55, 0.96));
+  color: #88ded2;
+}
+
+@media (max-width: 720px) {
+  .inspection-photo-gallery-overlay { padding: 14px; }
+  .inspection-photo-gallery-dialog { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
+  .inspection-photo-gallery-grid { grid-template-columns: 1fr; max-height: calc(100vh - 136px); }
 }
 
 /* 七项检测信息卡片的文字统一略微放大。 */

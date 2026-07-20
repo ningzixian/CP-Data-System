@@ -13,6 +13,19 @@ const BASE = '/data'
 
 const COMMUNITIES = ['南海家园七里', '南海家园三里', '南海家园六里']
 
+export interface ZhiwenNetworkData {
+  pipes: PipeRow[]
+  inlets: PointRow[]
+  controls: PointRow[]
+  joints: PointRow[]
+  regulators: PointRow[]
+  communities: string[]
+  topology: TopologyData | null
+}
+
+let networkDataCache: ZhiwenNetworkData | null = null
+let networkDataPromise: Promise<ZhiwenNetworkData> | null = null
+
 async function fetchText(path: string, required = true): Promise<string> {
   try {
     const r = await fetch(path)
@@ -57,15 +70,7 @@ function parsePoints(community: string, text: string, type: PointRow['type']): P
 }
 
 /** 加载全部管网原始数据（含物探拓扑数据） */
-export async function loadZhiwenNetworkData(): Promise<{
-  pipes: PipeRow[]
-  inlets: PointRow[]
-  controls: PointRow[]
-  joints: PointRow[]
-  regulators: PointRow[]
-  communities: string[]
-  topology: TopologyData | null
-}> {
+async function loadZhiwenNetworkDataUncached(): Promise<ZhiwenNetworkData> {
   const pipes: PipeRow[] = []
   const inlets: PointRow[] = []
   const controls: PointRow[] = []
@@ -109,6 +114,28 @@ export async function loadZhiwenNetworkData(): Promise<{
   }
 
   return { pipes, inlets, controls, joints, regulators, communities: [...COMMUNITIES], topology: null }
+}
+
+/**
+ * 管网和拓扑数据在多个页面之间共享。默认复用解析结果，避免每次路由切换都重新请求、解析 CSV/XLSX。
+ * 数据管理执行明确的刷新或写操作后，可传 force=true 强制重载。
+ */
+export async function loadZhiwenNetworkData(force = false): Promise<ZhiwenNetworkData> {
+  if (!force && networkDataCache) return networkDataCache
+  if (networkDataPromise) return networkDataPromise
+
+  networkDataPromise = loadZhiwenNetworkDataUncached()
+  try {
+    const data = await networkDataPromise
+    networkDataCache = data
+    return data
+  } finally {
+    networkDataPromise = null
+  }
+}
+
+export function invalidateZhiwenNetworkDataCache() {
+  networkDataCache = null
 }
 
 /** 从 CP store 获取 units + records → ZhiwenData 格式 */

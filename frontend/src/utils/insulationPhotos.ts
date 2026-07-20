@@ -15,6 +15,7 @@ const STORE_NAME = 'inlet-photos'
 const OWNER_INDEX = 'ownerKey'
 
 let databasePromise: Promise<IDBDatabase> | null = null
+const photoListRequests = new Map<string, Promise<InsulationPhotoRecord[]>>()
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -58,12 +59,23 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function listInsulationPhotos(ownerKey: string): Promise<InsulationPhotoRecord[]> {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readonly')
-  const records = await requestResult(
-    transaction.objectStore(STORE_NAME).index(OWNER_INDEX).getAll(ownerKey),
-  ) as InsulationPhotoRecord[]
-  return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const pending = photoListRequests.get(ownerKey)
+  if (pending) return pending
+
+  const request = (async () => {
+    const database = await openDatabase()
+    const transaction = database.transaction(STORE_NAME, 'readonly')
+    const records = await requestResult(
+      transaction.objectStore(STORE_NAME).index(OWNER_INDEX).getAll(ownerKey),
+    ) as InsulationPhotoRecord[]
+    return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  })()
+  photoListRequests.set(ownerKey, request)
+  try {
+    return await request
+  } finally {
+    if (photoListRequests.get(ownerKey) === request) photoListRequests.delete(ownerKey)
+  }
 }
 
 export async function addInsulationPhotos(ownerKey: string, inletId: number, files: File[]): Promise<void> {

@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<{
 
 const store = useCpStore()
 const mapRef = ref<HTMLDivElement | null>(null)
+const dataModuleCardLayerRef = ref<HTMLDivElement | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 
@@ -79,6 +80,18 @@ const DATA_MODULE_MARKER_SELECTORS: Record<DataModuleOverlayKey, string> = {
   continuity: '.continuity-map-marker',
   inletParameter: '.inlet-parameter-map-marker',
 }
+const DATA_MODULE_CARD_BODY_SELECTOR = [
+  '.insulation-map-card',
+  '.soil-map-card',
+  '.dc-map-card',
+  '.coating-map-card',
+  '.potential-map-card',
+  '.continuity-map-card',
+  '.inlet-parameter-map-card',
+  '.potential-map-pending',
+  '.continuity-map-pending',
+  '.inlet-parameter-map-pending',
+].join(',')
 const unitPolygons = new Map<number, any>()
 const unitMarkers = new Map<number, any>()
 const unitProgressCircles = new Map<number, any>()
@@ -97,6 +110,7 @@ let continuityRenderSequence = 0
 const inletParameterPhotoUrls = new Set<string>()
 let inletParameterRenderSequence = 0
 let dataModuleFitSequence = 0
+let selectedUnitRenderFrame: number | null = null
 
 const inspectionPhotoSelector = [
   '.insulation-map-photos img',
@@ -109,11 +123,85 @@ const inspectionPhotoSelector = [
 ].join(', ')
 let inspectionPhotoPreview: HTMLImageElement | null = null
 let inspectionPhotoPreviewSource: HTMLImageElement | null = null
+let inspectionPhotoGalleryOverlay: HTMLDivElement | null = null
+
+interface InspectionPhotoView {
+  name: string
+  url: string
+}
+
+function inspectionPhotosHtml(
+  photos: InspectionPhotoView[],
+  className: string,
+  emptyClassName: string,
+  emptyText: string,
+  galleryTitle: string,
+) {
+  if (!photos.length) return `<div class="${emptyClassName}">${e(emptyText)}</div>`
+  const thumbnails = photos.slice(0, 2).map((photo) =>
+    `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`,
+  ).join('')
+  const moreButton = photos.length > 2
+    ? `<button type="button" class="inspection-photo-more" data-gallery-title="${e(galleryTitle)}" data-gallery-photos="${e(JSON.stringify(photos))}" aria-label="查看${e(galleryTitle)}的全部${photos.length}张照片"><span>▦</span>查看全部 ${photos.length} 张</button>`
+    : ''
+  return `<div class="${className}">${thumbnails}${moreButton}</div>`
+}
 
 function removeInspectionPhotoPreview() {
   inspectionPhotoPreview?.remove()
   inspectionPhotoPreview = null
   inspectionPhotoPreviewSource = null
+}
+
+function closeInspectionPhotoGallery() {
+  inspectionPhotoGalleryOverlay?.remove()
+  inspectionPhotoGalleryOverlay = null
+  document.removeEventListener('keydown', handleInspectionPhotoGalleryKeydown)
+}
+
+function handleInspectionPhotoGalleryKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeInspectionPhotoGallery()
+}
+
+function openInspectionPhotoGallery(title: string, photos: InspectionPhotoView[]) {
+  closeInspectionPhotoGallery()
+  removeInspectionPhotoPreview()
+  const overlay = document.createElement('div')
+  overlay.className = 'inspection-photo-gallery-overlay'
+  overlay.innerHTML = `
+    <section class="inspection-photo-gallery-dialog" role="dialog" aria-modal="true" aria-label="${e(title)}">
+      <header>
+        <div><span>检测留痕</span><strong>${e(title)}</strong><small>共 ${photos.length} 张照片</small></div>
+        <button type="button" data-gallery-close aria-label="关闭照片查看器">×</button>
+      </header>
+      <div class="inspection-photo-gallery-grid">
+        ${photos.map((photo, index) => `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="打开原图：${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"><span>${index + 1}</span><b>${e(photo.name)}</b></a>`).join('')}
+      </div>
+    </section>`
+  overlay.addEventListener('click', (event) => {
+    const target = event.target
+    if (target === overlay || (target instanceof Element && target.closest('[data-gallery-close]'))) closeInspectionPhotoGallery()
+  })
+  document.body.appendChild(overlay)
+  inspectionPhotoGalleryOverlay = overlay
+  document.addEventListener('keydown', handleInspectionPhotoGalleryKeydown)
+  requestAnimationFrame(() => overlay.classList.add('is-visible'))
+}
+
+function handleInspectionPhotoClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const button = target.closest('.inspection-photo-more')
+  if (!(button instanceof HTMLButtonElement)) return
+  event.preventDefault()
+  event.stopPropagation()
+  try {
+    const photos = JSON.parse(button.dataset.galleryPhotos ?? '[]') as InspectionPhotoView[]
+    if (!Array.isArray(photos) || photos.length <= 2) return
+    openInspectionPhotoGallery(button.dataset.galleryTitle || '检测照片', photos)
+  } catch (error) {
+    console.warn('[Map] 照片列表解析失败：', error)
+  }
 }
 
 function handleInspectionPhotoOver(event: MouseEvent) {
@@ -177,12 +265,143 @@ const PIPE_DEFAULT = { strokeColor: '#67c23a', strokeWeight: 3, strokeOpacity: 0
 const PIPE_ACTIVE = { strokeColor: '#8B4513', strokeWeight: 6, strokeOpacity: 1, zIndex: 810 }
 const UNIT_PROGRESS_DEFAULT_Z_INDEX = 100
 const UNIT_PROGRESS_ACTIVE_Z_INDEX = 3000
+const DATA_MODULE_CARD_Z_INDEX = 4000
+const DATA_MODULE_CARD_HOVER_Z_INDEX = 6000
+const DATA_MODULE_SINGLE_CARD_THRESHOLD = 3
+const dataModuleMarkerBindings = new WeakMap<HTMLElement, { item: any; restingZIndex: number }>()
+
+interface ElevatedDataModuleCard {
+  source: HTMLElement
+  item: any
+  portal: HTMLDivElement
+  offsetX: number
+  offsetY: number
+}
+
+let elevatedDataModuleCards: ElevatedDataModuleCard[] = []
+let elevatedDataModuleCardFrame: number | null = null
+
+function clearElevatedDataModuleCards() {
+  if (elevatedDataModuleCardFrame !== null) cancelAnimationFrame(elevatedDataModuleCardFrame)
+  elevatedDataModuleCardFrame = null
+  elevatedDataModuleCards.forEach(({ source }) => source.classList.remove('has-elevated-data-module-card'))
+  elevatedDataModuleCards = []
+  dataModuleCardLayerRef.value?.replaceChildren()
+}
+
+function positionElevatedDataModuleCards() {
+  if (!map) return
+  elevatedDataModuleCards.forEach(({ item, portal, offsetX, offsetY }) => {
+    const position = item.getPosition?.()
+    if (!position) return
+    const pixel = map.lngLatToContainer(position)
+    portal.style.left = `${Number(pixel.getX()) + offsetX}px`
+    portal.style.top = `${Number(pixel.getY()) + offsetY}px`
+  })
+}
+
+/**
+ * 高德地图的标记层位于带 transform 的独立层叠上下文中，内部再高的 z-index
+ * 也无法盖过地图面板上的编辑工具栏。点位仍由高德管理，信息卡复制到地图的
+ * 独立上层中，并记录它相对点位的像素偏移，以便地图平移时同步位置。
+ */
+function rebuildElevatedDataModuleCards() {
+  clearElevatedDataModuleCards()
+  if (!map || !mapRef.value || !dataModuleCardLayerRef.value || !props.activeDataModule) return
+  const kind = DATA_MODULE_OVERLAY_KEYS[props.activeDataModule]
+  if (!kind) return
+  const mapRect = mapRef.value.getBoundingClientRect()
+  const roots = overlays[kind]
+    .map((item) => ({ item, source: (item as any).__content as HTMLElement | undefined }))
+    .filter((entry): entry is { item: any; source: HTMLElement } => !!entry.source)
+  const focusMode = roots.some(({ source }) => source.classList.contains('data-module-focus-mode'))
+  const visibleRoots = focusMode
+    ? roots.filter(({ source }) => source.classList.contains('is-card-active'))
+    : roots
+
+  visibleRoots.forEach(({ item, source }, index) => {
+    const card = source.querySelector<HTMLElement>(DATA_MODULE_CARD_BODY_SELECTOR)
+    const position = item.getPosition?.()
+    if (!card || !position) return
+    const cardRect = card.getBoundingClientRect()
+    if (!cardRect.width || !cardRect.height) return
+    const pixel = map.lngLatToContainer(position)
+    const offsetX = cardRect.left + cardRect.width / 2 - mapRect.left - Number(pixel.getX())
+    const offsetY = cardRect.bottom - mapRect.top - Number(pixel.getY())
+    const portal = document.createElement('div')
+    portal.className = 'data-module-card-portal'
+    portal.style.width = `${cardRect.width}px`
+    portal.style.zIndex = String(source.classList.contains('is-card-active') ? DATA_MODULE_CARD_HOVER_Z_INDEX : DATA_MODULE_CARD_Z_INDEX + index)
+    portal.appendChild(card.cloneNode(true))
+    source.classList.add('has-elevated-data-module-card')
+    dataModuleCardLayerRef.value!.appendChild(portal)
+    elevatedDataModuleCards.push({ source, item, portal, offsetX, offsetY })
+  })
+  positionElevatedDataModuleCards()
+}
+
+function scheduleElevatedDataModuleCards() {
+  if (elevatedDataModuleCardFrame !== null) cancelAnimationFrame(elevatedDataModuleCardFrame)
+  elevatedDataModuleCardFrame = requestAnimationFrame(() => {
+    elevatedDataModuleCardFrame = null
+    rebuildElevatedDataModuleCards()
+  })
+}
 
 function htmlElement(className: string, html: string): HTMLElement {
   const el = document.createElement('div')
   el.className = className
   el.innerHTML = html
   return el
+}
+
+function leftmostPointIndex(points: Array<{ lng: number | null; lat: number | null }>) {
+  let result = 0
+  points.forEach((point, index) => {
+    const current = points[result]
+    if (point.lng !== null && (current?.lng === null || point.lng < current.lng || (point.lng === current.lng && (point.lat ?? Infinity) < (current.lat ?? Infinity)))) {
+      result = index
+    }
+  })
+  return result
+}
+
+function dataModuleFocusClass(singleCardMode: boolean, index: number, initialIndex: number) {
+  if (!singleCardMode) return ''
+  return ` data-module-focus-mode${index === initialIndex ? ' is-card-active' : ''}`
+}
+
+function activateDataModuleCard(content: HTMLElement) {
+  if (!content.classList.contains('data-module-focus-mode')) return
+  mapRef.value?.querySelectorAll<HTMLElement>('.data-module-focus-mode.is-card-active').forEach((element) => {
+    if (element === content) return
+    element.classList.remove('is-card-active')
+    const binding = dataModuleMarkerBindings.get(element)
+    binding?.item.setzIndex?.(binding.restingZIndex)
+  })
+  content.classList.add('is-card-active')
+  dataModuleMarkerBindings.get(content)?.item.setzIndex?.(DATA_MODULE_CARD_HOVER_Z_INDEX)
+  scheduleElevatedDataModuleCards()
+}
+
+function bindDataModuleCardInteraction(content: HTMLElement, item: any, restingZIndex: number) {
+  const focusMode = content.classList.contains('data-module-focus-mode')
+  const pin = content.querySelector<HTMLElement>('[class$="-map-pin"] span')
+  const activationTarget = focusMode && pin ? pin : content
+  // 七类检测点位有些通过 marker() 创建，有些直接创建 AMap.Marker；
+  // 在公共绑定入口统一保存 DOM，供地图外的高层卡片覆盖层读取。
+  ;(item as any).__content = content
+  dataModuleMarkerBindings.set(content, { item, restingZIndex })
+
+  activationTarget.addEventListener('mouseenter', () => {
+    activateDataModuleCard(content)
+    item.setzIndex?.(DATA_MODULE_CARD_HOVER_Z_INDEX)
+  })
+  if (focusMode) {
+    if (content.classList.contains('is-card-active')) item.setzIndex?.(DATA_MODULE_CARD_HOVER_Z_INDEX)
+    return
+  }
+  content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
 }
 
 function marker(options: { position: [number, number]; className: string; html: string; size: [number, number]; zIndex: number; clickable?: boolean }) {
@@ -210,10 +429,14 @@ function communityColor(progress: number, exception = false) {
   return exception ? '#f56c6c' : progress >= 1 ? '#67c23a' : progress >= 0.8 ? '#85ce61' : progress > 0 ? '#e6a23c' : '#c0c4cc'
 }
 
+/*
+ * 已停用的小区进度球实现，完整保留以便以后恢复。
+ * 当前所有小区统一使用 boundaryInfoHtml 方块面板。
 function communityHtml(name: string, count: number, progress: number, exception: boolean, index: number) {
   const color = communityColor(progress, exception)
   return `<div class="community-anim" style="width:130px;height:130px;display:flex;align-items:center;justify-content:center;animation:communityPopIn .6s cubic-bezier(.34,1.56,.64,1) ${(index * 0.12).toFixed(2)}s both;transform-origin:center"><div class="community-hover-target" style="background:${color};color:#fff;border-radius:50%;width:130px;height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:4px solid #fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-family:-apple-system,sans-serif"><div style="font-size:30px;font-weight:700;line-height:1">${Math.round(progress * 100)}%</div><div style="font-size:13px;margin-top:6px;font-weight:600">${e(name)}</div><div style="font-size:11px;margin-top:3px;opacity:.85">${count} 个单元</div></div></div>`
 }
+*/
 
 function boundaryInfoHtml(name: string, progress: number, count: number, length: number) {
   return `<div class="community-boundary-info-content"><div class="community-boundary-info-name">${e(name)}</div><div class="community-boundary-info-metrics"><div class="community-boundary-info-row"><span>进度</span><span>：</span><span>${Math.round(progress * 100)}%</span></div><div class="community-boundary-info-row"><span>单元</span><span>：</span><span>${count} 个</span></div><div class="community-boundary-info-row"><span>管线</span><span>：</span><span>${Math.round(length).toLocaleString('zh-CN')} 米</span></div></div></div>`
@@ -222,9 +445,14 @@ function boundaryInfoHtml(name: string, progress: number, count: number, length:
 function add(kind: keyof typeof overlays, overlay: any) {
   overlays[kind].push(overlay)
   map.add(overlay)
+  const activeKind = props.activeDataModule
+    ? DATA_MODULE_OVERLAY_KEYS[props.activeDataModule]
+    : undefined
+  if (activeKind === kind) scheduleElevatedDataModuleCards()
 }
 
 function clearKind(kind: keyof typeof overlays) {
+  if (Object.values(DATA_MODULE_OVERLAY_KEYS).includes(kind as DataModuleOverlayKey)) clearElevatedDataModuleCards()
   if (overlays[kind].length) map?.remove(overlays[kind])
   overlays[kind] = []
 }
@@ -451,6 +679,7 @@ function formatResistance(value: number | null | undefined, unit = 'MΩ'): strin
 }
 
 function clearInsulationLayer() {
+  closeInspectionPhotoGallery()
   insulationRenderSequence++
   clearKind('insulation')
   insulationPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -478,25 +707,25 @@ async function renderInsulation() {
   }))
   if (sequence !== insulationRenderSequence || props.activeDataModule !== 'JOINT_VERIFY' || store.selectedUnit?.id !== unitId) return
   const photosByInlet = new Map(photoEntries)
+  const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(inlets)
 
   inlets.forEach((inlet, index) => {
     const reading = readings.get(inlet.fid)
     const complete = !!reading && reading.bolt_resistances.every((value) => value !== null)
       && reading.flange_resistance !== null
     const photos = photosByInlet.get(inlet.fid) ?? []
-    const photoViews = photos.map((photo) => {
+    const photoItems = photos.map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       insulationPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
-    const photoHtml = photoViews.length
-      ? `<div class="insulation-map-photos">${photoViews.join('')}</div>`
-      : '<div class="insulation-map-photo-empty">暂无现场照片</div>'
+    const photoHtml = inspectionPhotosHtml(photoItems, 'insulation-map-photos', 'insulation-map-photo-empty', '暂无现场照片', `引入口 ${inlet.ecode || inlet.fid}`)
     const bolts = Array.from({ length: 4 }, (_, boltIndex) =>
       `<div><span>螺栓 ${boltIndex + 1}</span><b>${formatResistance(reading?.bolt_resistances[boltIndex], reading?.bolt_resistance_units[boltIndex])}</b></div>`,
     ).join('')
     const content = htmlElement(
-      `insulation-map-marker${complete ? ' is-complete' : ' is-pending'}`,
+      `insulation-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `<div class="insulation-map-card"><header><span>引入口</span><strong>${e(inlet.ecode || inlet.fid)}</strong><i class="${complete ? 'complete' : ''}">${complete ? '数据完整' : '待录入'}</i></header><div class="insulation-map-values">${bolts}<div class="is-flange"><span>上下法兰之间</span><b>${formatResistance(reading?.flange_resistance, reading?.flange_resistance_unit)}</b></div></div>${photoHtml}</div><div class="insulation-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
@@ -506,12 +735,11 @@ async function renderInsulation() {
       anchor: 'bottom-center',
       // 编号圆直径为 28px；向下偏移半径，使圆心与原始引入口坐标重合。
       offset: new AMapApi.Pixel(0, 14),
-      zIndex: 900 + index,
+      zIndex: DATA_MODULE_CARD_Z_INDEX + index,
       clickable: true,
       bubble: false,
     })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(1800))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(900 + index))
+    bindDataModuleCardInteraction(content, item, DATA_MODULE_CARD_Z_INDEX + index)
     add('insulation', item)
   })
 
@@ -524,6 +752,7 @@ function handleInsulationDataChange(event: Event) {
 }
 
 function clearSoilLayer() {
+  closeInspectionPhotoGallery()
   soilRenderSequence++
   clearKind('soil')
   soilPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -553,24 +782,21 @@ async function renderSoilResistivity() {
   }))
   if (sequence !== soilRenderSequence || props.activeDataModule !== 'SOIL_RESISTIVITY' || store.selectedUnit?.id !== unitId) return
   const photosByPoint = new Map(photoEntries)
+  const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(points)
 
   points.forEach((point, index) => {
     const photos = photosByPoint.get(point.id) ?? []
-    const builtInPhotoHtml = point.photo_urls.map((photo) =>
-      `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`,
-    )
-    const savedPhotoHtml = photos.map((photo) => {
+    const builtInPhotos = point.photo_urls.map((photo) => ({ url: photo.url, name: photo.name }))
+    const savedPhotos = photos.map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       soilPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
-    const photoItems = [...builtInPhotoHtml, ...savedPhotoHtml]
-    const photoHtml = photoItems.length
-      ? `<div class="soil-map-photos">${photoItems.join('')}</div>`
-      : '<div class="soil-map-photo-empty">暂无现场照片</div>'
+    const photoHtml = inspectionPhotosHtml([...builtInPhotos, ...savedPhotos], 'soil-map-photos', 'soil-map-photo-empty', '暂无现场照片', point.name)
     const complete = point.ground_rod_count !== null && point.ground_rod_spacing !== null && point.resistivity !== null
     const content = htmlElement(
-      `soil-map-marker${complete ? ' is-complete' : ' is-pending'}`,
+      `soil-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `<div class="soil-map-card"><header><span>测试位置</span><strong>${e(point.name)}</strong><i>${complete ? '数据完整' : '待录入'}</i></header><div class="soil-map-layout"><div class="soil-map-primary"><span>土壤电阻率</span><b>${formatSoilValue(point.resistivity, 'Ω·m')}</b></div><div class="soil-map-values"><div><span>地钎</span><b>${formatSoilValue(point.ground_rod_count, '根')}</b></div><div><span>间距</span><b>${formatSoilValue(point.ground_rod_spacing, 'm')}</b></div><div><span>电流 I</span><b>${formatSoilValue(point.test_current, 'mA')}</b></div><div><span>电压 U</span><b>${formatSoilValue(point.test_voltage, 'mV')}</b></div><div><span>电阻 R</span><b>${formatSoilValue(point.measured_resistance, 'Ω')}</b></div><div><span>系数 K</span><b>${formatSoilValue(point.geometric_coefficient)}</b></div></div><div class="soil-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div></div><div class="soil-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
@@ -579,12 +805,11 @@ async function renderSoilResistivity() {
       content,
       anchor: 'bottom-center',
       offset: new AMapApi.Pixel(0, 14),
-      zIndex: 950 + index,
+      zIndex: DATA_MODULE_CARD_Z_INDEX + index,
       clickable: true,
       bubble: false,
     })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(1850))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(950 + index))
+    bindDataModuleCardInteraction(content, item, DATA_MODULE_CARD_Z_INDEX + index)
     add('soil', item)
   })
   // 不在照片异步读取完成后再次自动定位，避免地图突然跳动。
@@ -596,6 +821,7 @@ function handleSoilDataChange(event: Event) {
 }
 
 function clearDcStrayLayer() {
+  closeInspectionPhotoGallery()
   dcStrayRenderSequence++
   clearKind('dcStray')
   dcStrayPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -621,26 +847,27 @@ async function renderDcStrayCurrent() {
   }))
   if (sequence !== dcStrayRenderSequence || props.activeDataModule !== 'DC_STRAY_CURRENT' || store.selectedUnit?.id !== unitId) return
   const photosByPoint = new Map(photoEntries)
+  const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(points)
 
   points.forEach((point, index) => {
-    const builtInPhotos = point.photo_urls.map((photo) => `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`)
+    const builtInPhotos = point.photo_urls.map((photo) => ({ url: photo.url, name: photo.name }))
     const savedPhotos = (photosByPoint.get(point.id) ?? []).map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       dcStrayPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
     const photoItems = [...builtInPhotos, ...savedPhotos]
-    const photoHtml = photoItems.length ? `<div class="dc-map-photos">${photoItems.join('')}</div>` : '<div class="dc-map-photo-empty">暂无现场照片</div>'
+    const photoHtml = inspectionPhotosHtml(photoItems, 'dc-map-photos', 'dc-map-photo-empty', '暂无现场照片', point.name)
     const readings = point.potential_readings.map((value, readingIndex) => `<div><span>样本 ${readingIndex + 1}</span><b>${Number(value).toFixed(4)} V</b></div>`).join('')
     const complete = point.potential_readings.length > 0
     const content = htmlElement(
-      `dc-map-marker${complete ? ' is-complete' : ' is-pending'}`,
+      `dc-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `<div class="dc-map-card"><header><span>直流监测</span><strong>${e(point.name)}</strong><i>${complete ? '数据完整' : '待录入'}</i></header><div class="dc-map-primary"><span>平均管地电位</span><b>${formatSoilValue(point.average_potential, 'V')}</b></div><div class="dc-map-stats"><span>范围 <b>${formatSoilValue(point.min_potential, 'V')} ～ ${formatSoilValue(point.max_potential, 'V')}</b></span><span>波动 <b>${formatSoilValue(point.potential_fluctuation, 'mV')}</b></span><span>参比电极 <b>${e(point.reference_electrode)}</b></span></div><div class="dc-map-readings">${readings}</div><div class="dc-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div><div class="dc-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: 970 + index, clickable: true, bubble: false })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(1900))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(970 + index))
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: DATA_MODULE_CARD_Z_INDEX + index, clickable: true, bubble: false })
+    bindDataModuleCardInteraction(content, item, DATA_MODULE_CARD_Z_INDEX + index)
     add('dcStray', item)
   })
 }
@@ -651,6 +878,7 @@ function handleDcStrayDataChange(event: Event) {
 }
 
 function clearCoatingLayer() {
+  closeInspectionPhotoGallery()
   coatingRenderSequence++
   clearKind('coating')
   coatingPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -676,26 +904,25 @@ async function renderCoatingDamage() {
   }))
   if (sequence !== coatingRenderSequence || props.activeDataModule !== 'COATING_DETECT' || store.selectedUnit?.id !== unitId) return
   const photosByPoint = new Map(photoEntries)
+  const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(points)
 
   points.forEach((point, index) => {
-    const builtInPhotos = point.photo_urls.map((photo) => `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`)
+    const builtInPhotos = point.photo_urls.map((photo) => ({ url: photo.url, name: photo.name }))
     const savedPhotos = (photosByPoint.get(point.id) ?? []).map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       coatingPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
     const photoItems = [...builtInPhotos, ...savedPhotos]
-    const photoHtml = photoItems.length
-      ? `<div class="coating-map-photos">${photoItems.join('')}</div>`
-      : '<div class="coating-map-photo-empty">照片待上传</div>'
+    const photoHtml = inspectionPhotosHtml(photoItems, 'coating-map-photos', 'coating-map-photo-empty', '照片待上传', point.name)
     const content = htmlElement(
-      'coating-map-marker',
+      `coating-map-marker${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `<div class="coating-map-card"><header><span>${e(point.building || '破损点')}</span><strong>${e(point.name)}</strong><i>${e(point.severity)}</i></header><div class="coating-map-location">${e(point.location_desc || '参考位置待补录')}</div><div class="coating-map-values"><div><span>埋深</span><b>${formatSoilValue(point.buried_depth, 'm')}</b></div><div><span>泄漏电位</span><b>${formatSoilValue(point.leakage_potential, 'mV')}</b></div><div><span>地表</span><b>${e(point.surface || '—')}</b></div><div><span>原始坐标</span><b>${formatSoilValue(point.source_x)}, ${formatSoilValue(point.source_y)}</b></div></div><div class="coating-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div><div class="coating-map-pin" aria-label="防腐层破损点"><span>×</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: 990 + index, clickable: true, bubble: false })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(1950))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(990 + index))
+    const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: DATA_MODULE_CARD_Z_INDEX + index, clickable: true, bubble: false })
+    bindDataModuleCardInteraction(content, item, DATA_MODULE_CARD_Z_INDEX + index)
     add('coating', item)
   })
 }
@@ -706,6 +933,7 @@ function handleCoatingDataChange(event: Event) {
 }
 
 function clearPotentialLayer() {
+  closeInspectionPhotoGallery()
   potentialRenderSequence++
   clearKind('potential')
   potentialPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -734,6 +962,8 @@ async function renderPipeGroundPotential() {
   }))
   if (sequence !== potentialRenderSequence || props.activeDataModule !== 'PIPE_GROUND_POTENTIAL' || store.selectedUnit?.id !== unitId) return
   const photosByInlet = new Map(photoEntries)
+  const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(inlets)
 
   inlets.forEach((inlet, index) => {
     const reading = readings.get(inlet.fid)
@@ -741,23 +971,20 @@ async function renderPipeGroundPotential() {
     const photos = (photosByInlet.get(inlet.fid) ?? []).map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       potentialPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
-    const photoHtml = photos.length
-      ? `<div class="potential-map-photos">${photos.join('')}</div>`
-      : '<div class="potential-map-photo-empty">照片待上传</div>'
+    const photoHtml = inspectionPhotosHtml(photos, 'potential-map-photos', 'potential-map-photo-empty', '照片待上传', `引入口 ${inlet.ecode || inlet.fid}`)
     const cardHtml = complete
       ? `<div class="potential-map-card"><header><span>引入口 ${index + 1}</span><strong>${e(inlet.ecode || String(inlet.fid))}</strong><i>已检测</i></header><div class="potential-map-primary"><span>自然电位</span><b>${Number(reading!.natural_potential).toFixed(4)} V</b></div><div class="potential-map-values"><div><span>参比电极</span><b>${e(reading?.reference_electrode || 'Cu/CuSO₄')}</b></div><div><span>测试方法</span><b>${e(reading?.test_method || '自然电位法')}</b></div><div><span>管号</span><b>${e(inlet.pipeno || '—')}</b></div><div><span>压力</span><b>${e(inlet.pressured || '—')}</b></div></div>${reading?.note ? `<div class="potential-map-note">${e(reading.note)}</div>` : ''}${photoHtml}</div>`
       : `<div class="potential-map-pending"><strong>${e(inlet.ecode || String(inlet.fid))}</strong><span>自然电位待录入</span></div>`
     const content = htmlElement(
-      `potential-map-marker${complete ? ' is-complete' : ' is-pending'}`,
+      `potential-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `${cardHtml}<div class="potential-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const restingZIndex = complete ? 1650 : 1010 + index
+    const restingZIndex = DATA_MODULE_CARD_Z_INDEX + index
     const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(2050))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+    bindDataModuleCardInteraction(content, item, restingZIndex)
     add('potential', item)
   })
 }
@@ -768,6 +995,7 @@ function handlePotentialDataChange(event: Event) {
 }
 
 function clearContinuityLayer() {
+  closeInspectionPhotoGallery()
   continuityRenderSequence++
   clearKind('continuity')
   continuityPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -793,32 +1021,31 @@ async function renderElectricContinuity() {
   }))
   if (sequence !== continuityRenderSequence || props.activeDataModule !== 'ELECTRIC_CONTINUITY' || store.selectedUnit?.id !== unitId) return
   const photosByPoint = new Map(photoEntries)
+  const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(points)
 
   points.forEach((point, index) => {
-    const builtInPhotos = point.photo_urls.map((photo) => `<a href="${e(photo.url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(photo.url)}" alt="${e(photo.name)}"></a>`)
+    const builtInPhotos = point.photo_urls.map((photo) => ({ url: photo.url, name: photo.name }))
     const savedPhotos = (photosByPoint.get(point.id) ?? []).map((photo) => {
       const url = URL.createObjectURL(photo.blob)
       continuityPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
     const photos = [...builtInPhotos, ...savedPhotos]
-    const photoHtml = photos.length
-      ? `<div class="continuity-map-photos">${photos.join('')}</div>`
-      : '<div class="continuity-map-photo-empty">照片待上传</div>'
+    const photoHtml = inspectionPhotosHtml(photos, 'continuity-map-photos', 'continuity-map-photo-empty', '照片待上传', point.name)
     const complete = hasElectricContinuityResult(point)
     const statusClass = point.is_connected === true ? ' is-connected' : point.is_connected === false ? ' is-isolated' : ''
     const cardHtml = complete
       ? `<div class="continuity-map-card"><header><span>测试位置 ${index + 1}</span><strong>${e(point.name)}</strong><i>${e(point.conclusion)}</i></header><div class="continuity-map-primary"><span>测试电阻</span><b>${Number(point.measured_resistance).toFixed(1)} ${e(point.resistance_unit)}</b></div><div class="continuity-map-values"><div><span>测试对象</span><b>${e(point.target_type)}</b></div><div><span>测试方法</span><b>${e(String(record?.result_data?.method ?? '电阻测量法'))}</b></div></div><div class="continuity-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${point.note ? `<div class="continuity-map-note">${e(point.note)}</div>` : ''}${photoHtml}</div>`
       : `<div class="continuity-map-pending"><strong>${e(point.name)}</strong><span>电联通性待录入</span></div>`
     const content = htmlElement(
-      `continuity-map-marker${complete ? ' is-complete' : ' is-pending'}${statusClass}`,
+      `continuity-map-marker${complete ? ' is-complete' : ' is-pending'}${statusClass}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
       `${cardHtml}<div class="continuity-map-pin"><span>↔</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
-    const restingZIndex = complete ? 1660 : 1020 + index
+    const restingZIndex = DATA_MODULE_CARD_Z_INDEX + index
     const item = new AMapApi.Marker({ position: [point.lng, point.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(2060))
-    content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+    bindDataModuleCardInteraction(content, item, restingZIndex)
     add('continuity', item)
   })
 }
@@ -829,6 +1056,7 @@ function handleElectricContinuityDataChange(event: Event) {
 }
 
 function clearInletParameterLayer() {
+  closeInspectionPhotoGallery()
   inletParameterRenderSequence++
   clearKind('inletParameter')
   inletParameterPhotoUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -849,26 +1077,28 @@ async function renderInletParameters() {
   }))
   if (sequence !== inletParameterRenderSequence || props.activeDataModule !== 'INLET_PARAM' || store.selectedUnit?.id !== unitId) return
   const photosByInlet = new Map(photoEntries)
+  const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
+  const initialCardIndex = leftmostPointIndex(inlets)
 
   inlets.forEach((inlet, index) => {
     const reading = readings.get(inlet.fid)
     const complete = hasInletParameterResult(reading)
     const photos = (photosByInlet.get(inlet.fid) ?? []).map((photo) => {
       const url = URL.createObjectURL(photo.blob); inletParameterPhotoUrls.add(url)
-      return `<a href="${e(url)}" target="_blank" rel="noopener noreferrer" title="${e(photo.name)}"><img src="${e(url)}" alt="${e(photo.name)}"></a>`
+      return { url, name: photo.name }
     })
-    const photoHtml = photos.length ? `<div class="inlet-parameter-map-photos">${photos.join('')}</div>` : '<div class="inlet-parameter-map-photo-empty">照片待上传</div>'
+    const photoHtml = inspectionPhotosHtml(photos, 'inlet-parameter-map-photos', 'inlet-parameter-map-photo-empty', '照片待上传', `引入口 ${inlet.ecode || inlet.fid}`)
     const readingsHtml = reading?.diameter_readings.length
       ? `<div class="inlet-parameter-map-readings">${reading.diameter_readings.map((value, i) => `<span>测量${i + 1}<b>${value.toFixed(1)} mm</b></span>`).join('')}</div>`
       : ''
     const cardHtml = complete
       ? `<div class="inlet-parameter-map-card"><header><span>引入口 ${index + 1}</span><strong>${e(inlet.ecode || String(inlet.fid))}</strong><i>已检测</i></header><div class="inlet-parameter-map-primary"><span>平均外径</span><b>${Number(reading!.average_diameter).toFixed(1)} mm</b></div>${readingsHtml}<div class="inlet-parameter-map-values"><div><span>最大偏差</span><b>${reading?.diameter_difference?.toFixed(2) ?? '—'} mm</b></div><div><span>不圆度</span><b>${reading?.out_of_roundness?.toFixed(3) ?? '—'} %</b></div><div><span>壁厚</span><b>${reading?.wall_thickness !== null && reading?.wall_thickness !== undefined ? `${reading.wall_thickness.toFixed(2)} mm` : '待录入'}</b></div><div><span>仪器</span><b>${e(reading?.instrument || '数显游标卡尺')}</b></div></div>${reading?.note ? `<div class="inlet-parameter-map-note">${e(reading.note)}</div>` : ''}${photoHtml}</div>`
       : `<div class="inlet-parameter-map-pending"><strong>${e(inlet.ecode || String(inlet.fid))}</strong><span>引入口参数待录入</span></div>`
-    const content = htmlElement(`inlet-parameter-map-marker${complete ? ' is-complete' : ' is-pending'}`, `${cardHtml}<div class="inlet-parameter-map-pin"><span>Ø</span></div>`)
+    const content = htmlElement(`inlet-parameter-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`, `${cardHtml}<div class="inlet-parameter-map-pin"><span>Ø</span></div>`)
     content.addEventListener('click', (event) => event.stopPropagation())
-    const restingZIndex = complete ? 1670 : 1030 + index
+    const restingZIndex = DATA_MODULE_CARD_Z_INDEX + index
     const item = new AMapApi.Marker({ position: [inlet.lng, inlet.lat], content, anchor: 'bottom-center', offset: new AMapApi.Pixel(0, 14), zIndex: restingZIndex, clickable: true, bubble: false })
-    content.addEventListener('mouseenter', () => item.setzIndex?.(2070)); content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+    bindDataModuleCardInteraction(content, item, restingZIndex)
     add('inletParameter', item)
   })
 }
@@ -876,6 +1106,32 @@ async function renderInletParameters() {
 function handleInletParameterDataChange(event: Event) {
   const unitId = Number((event as CustomEvent<{ unitId?: number }>).detail?.unitId)
   if (!Number.isFinite(unitId) || unitId === store.selectedUnit?.id) void renderInletParameters()
+}
+
+function clearDataModuleLayers(except?: DataModuleOverlayKey) {
+  if (except !== 'insulation') clearInsulationLayer()
+  if (except !== 'soil') clearSoilLayer()
+  if (except !== 'dcStray') clearDcStrayLayer()
+  if (except !== 'coating') clearCoatingLayer()
+  if (except !== 'potential') clearPotentialLayer()
+  if (except !== 'continuity') clearContinuityLayer()
+  if (except !== 'inletParameter') clearInletParameterLayer()
+}
+
+/** 仅构建当前选中的检测图层，避免每次选择单元都重复执行七套异步照片读取。 */
+function renderActiveDataModule(code = props.activeDataModule): Promise<void> {
+  const activeKind = code ? DATA_MODULE_OVERLAY_KEYS[code] : undefined
+  clearDataModuleLayers(activeKind)
+  switch (code) {
+    case 'JOINT_VERIFY': return renderInsulation()
+    case 'SOIL_RESISTIVITY': return renderSoilResistivity()
+    case 'DC_STRAY_CURRENT': return renderDcStrayCurrent()
+    case 'COATING_DETECT': return renderCoatingDamage()
+    case 'PIPE_GROUND_POTENTIAL': return renderPipeGroundPotential()
+    case 'ELECTRIC_CONTINUITY': return renderElectricContinuity()
+    case 'INLET_PARAM': return renderInletParameters()
+    default: return Promise.resolve()
+  }
 }
 
 function groupsByCommunity() {
@@ -944,7 +1200,7 @@ function renderCommunities() {
     rendered.add(boundary.name)
   })
 
-  let index = 0
+  // 没有边界文件的小区也统一使用方块信息面板，不再退回圆形进度球。
   groups.forEach((units, name) => {
     if (rendered.has(name)) return
     const positions: Array<[number, number]> = []
@@ -959,13 +1215,14 @@ function renderCommunities() {
     const center = boundsCenter(positions)
     if (!center) return
     const progress = averageProgress(units)
-    const item = marker({ position: center, className: 'community-progress-marker', html: communityHtml(name, units.length, progress, units.some((unit) => unit.inspection_status === 'exception'), index++), size: [130, 130], zIndex: 600 })
+    const length = (store.facilities?.pipes ?? []).filter((pipe) => pipe.community === name).reduce((sum, pipe) => sum + (Number.parseFloat(pipe.length) || 0), 0)
+    const item = marker({ position: center, className: 'community-boundary-info', html: boundaryInfoHtml(name, progress, units.length, length), size: [220, 96], zIndex: 610 })
     item.on('click', () => focusCommunity(name, center))
     add('community', item)
   })
 }
 
-/** 三里边界文字仅在初始化层级及以上显示，继续缩小时隐藏以避免画面拥挤。 */
+/** 小区方块面板仅在初始化层级及以上显示，继续缩小时隐藏以避免画面拥挤。 */
 function syncCommunityInfoVisibility() {
   if (!map) return
   const visible = isCommunityView && map.getZoom() >= COMMUNITY_INFO_MIN_ZOOM
@@ -1132,7 +1389,14 @@ function fitToAll() {
   if (candidates.length) map.setFitView(candidates, false, [60, 60, 60, 60], 16)
 }
 
-/** 根据当前数据模块实际渲染的点位调整视野，并为顶部方块与信息卡预留空间。 */
+function dataModuleAxisShift(min: number, max: number, safeMin: number, safeMax: number) {
+  if (min < safeMin && max > safeMax) return (safeMin + safeMax - min - max) / 2
+  if (min < safeMin) return safeMin - min
+  if (max > safeMax) return safeMax - max
+  return 0
+}
+
+/** 保持当前缩放层级，只平移地图，让数据点位及其信息卡避开页面浮层。 */
 function fitActiveDataModule() {
   if (!map || !props.activeDataModule) return
   const code = props.activeDataModule
@@ -1141,25 +1405,53 @@ function fitActiveDataModule() {
   if (!kind || !candidates.length) return
   const sequence = ++dataModuleFitSequence
 
-  // Wait until the new module cards have completed layout, then perform exactly one animated view change.
+  // 等待新模块卡片完成布局，再执行一次不改变缩放层级的平移动画。
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (sequence !== dataModuleFitSequence || !map || !mapRef.value || props.activeDataModule !== code) return
     const mapRect = mapRef.value.getBoundingClientRect()
     const moduleDeck = document.querySelector<HTMLElement>('.unit-data-modules.visible')
     const deckRect = moduleDeck?.getBoundingClientRect()
-    const cards = [...mapRef.value.querySelectorAll<HTMLElement>(DATA_MODULE_MARKER_SELECTORS[kind])]
-    const maxCardWidth = Math.max(0, ...cards.map((card) => card.getBoundingClientRect().width))
-    const maxCardHeight = Math.max(0, ...cards.map((card) => card.getBoundingClientRect().height))
-    const deckBottom = deckRect ? Math.max(0, deckRect.bottom - mapRect.top + 14) : 16
-    const padding = [
-      Math.ceil(deckBottom + maxCardHeight),
-      46,
-      Math.ceil(maxCardWidth / 2 + 18),
-      Math.ceil(maxCardWidth / 2 + 18),
-    ]
+    const markers = [...mapRef.value.querySelectorAll<HTMLElement>(DATA_MODULE_MARKER_SELECTORS[kind])]
+    if (!markers.length) return
+    const cardBodies = markers.flatMap((marker) => [...marker.querySelectorAll<HTMLElement>(DATA_MODULE_CARD_BODY_SELECTOR)])
+    const elevatedCards = [...(dataModuleCardLayerRef.value?.querySelectorAll<HTMLElement>('.data-module-card-portal > *') ?? [])]
+    const activeMarker = markers.find((marker) => marker.classList.contains('is-card-active')) ?? markers[0]
+    const activeCard = activeMarker?.querySelector<HTMLElement>(DATA_MODULE_CARD_BODY_SELECTOR)
+    const focusMode = markers.some((marker) => marker.classList.contains('data-module-focus-mode'))
+    const visibleCards = elevatedCards.length
+      ? elevatedCards
+      : focusMode
+        ? (activeCard ? [activeCard] : [])
+        : cardBodies.filter((card) => getComputedStyle(card).visibility !== 'hidden')
+    const measuredCards = visibleCards.length ? visibleCards : (activeMarker ? [activeMarker] : markers)
+    const cardRects = measuredCards.map((card) => card.getBoundingClientRect())
+    const cardBounds = {
+      left: Math.min(...cardRects.map((rect) => rect.left)),
+      right: Math.max(...cardRects.map((rect) => rect.right)),
+      top: Math.min(...cardRects.map((rect) => rect.top)),
+      bottom: Math.max(...cardRects.map((rect) => rect.bottom)),
+    }
+    const deckBottom = deckRect ? deckRect.bottom + 20 : mapRect.top + 20
+    const cardSafeLeft = mapRect.left + 28
+    const cardSafeRight = Math.max(cardSafeLeft + 40, mapRect.right - 28)
+    const cardSafeTop = Math.min(mapRect.bottom - 92, Math.max(mapRect.top + 20, deckBottom))
+    const cardSafeBottom = Math.max(cardSafeTop + 40, mapRect.bottom - 28)
+    const pixels = candidates
+      .map((candidate) => candidate.getPosition?.())
+      .filter(Boolean)
+      .map((position) => map.lngLatToContainer(position))
+    if (!pixels.length) return
 
-    // No minimum zoom clamp: setFitView may zoom out as needed to keep every card inside the map panel.
-    map.setFitView(candidates, false, padding, candidates.length === 1 ? DETAIL_ZOOM : MAX_ZOOM)
+    const xs = pixels.map((pixel) => Number(pixel.getX()))
+    const ys = pixels.map((pixel) => Number(pixel.getY()))
+    let dx = dataModuleAxisShift(Math.min(...xs), Math.max(...xs), 32, mapRect.width - 32)
+    let dy = dataModuleAxisShift(Math.min(...ys), Math.max(...ys), 32, mapRect.height - 40)
+    dx += dataModuleAxisShift(cardBounds.left + dx, cardBounds.right + dx, cardSafeLeft, cardSafeRight)
+    dy += dataModuleAxisShift(cardBounds.top + dy, cardBounds.bottom + dy, cardSafeTop, cardSafeBottom)
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+
+    const targetCenter = map.containerToLngLat(new AMapApi.Pixel(mapRect.width / 2 - dx, mapRect.height / 2 - dy))
+    map.setCenter(targetCenter, false, 300)
   }))
 }
 
@@ -1172,13 +1464,7 @@ function renderAll() {
   renderRegulators()
   renderInlets()
   renderCommunities()
-  void renderInsulation()
-  void renderSoilResistivity()
-  void renderDcStrayCurrent()
-  void renderCoatingDamage()
-  void renderPipeGroundPotential()
-  void renderElectricContinuity()
-  void renderInletParameters()
+  void renderActiveDataModule()
   applyVisibility()
   fitToAll()
 }
@@ -1200,6 +1486,11 @@ onMounted(async () => {
   if (!mapRef.value) return
   mapRef.value.addEventListener('mouseover', handleInspectionPhotoOver)
   mapRef.value.addEventListener('mouseout', handleInspectionPhotoOut)
+  // 地图卡片自身会阻止点击冒泡，因此照片入口需要在捕获阶段优先处理。
+  mapRef.value.addEventListener('click', handleInspectionPhotoClick, true)
+  dataModuleCardLayerRef.value?.addEventListener('mouseover', handleInspectionPhotoOver)
+  dataModuleCardLayerRef.value?.addEventListener('mouseout', handleInspectionPhotoOut)
+  dataModuleCardLayerRef.value?.addEventListener('click', handleInspectionPhotoClick, true)
   try {
     AMapApi = await loadAMap()
     map = new AMapApi.Map(mapRef.value, {
@@ -1217,6 +1508,8 @@ onMounted(async () => {
     map.addControl(new AMapApi.Scale())
     map.on('click', clearAll)
     map.on('zoomend', handleZoomEnd)
+    map.on('mapmove', positionElevatedDataModuleCards)
+    map.on('zoomchange', positionElevatedDataModuleCards)
     window.addEventListener('themechange', handleThemeChange)
     window.addEventListener('insulationdatachange', handleInsulationDataChange)
     window.addEventListener('soilresistivitydatachange', handleSoilDataChange)
@@ -1244,15 +1537,7 @@ watch(() => props.activeDataModule, async (code) => {
   // Invalidate any pending double-rAF fit from a previously selected module.
   dataModuleFitSequence++
   applyVisibility()
-  await Promise.all([
-    renderInsulation(),
-    renderSoilResistivity(),
-    renderDcStrayCurrent(),
-    renderCoatingDamage(),
-    renderPipeGroundPotential(),
-    renderElectricContinuity(),
-    renderInletParameters(),
-  ])
+  await renderActiveDataModule(code)
   if (code && code === props.activeDataModule) fitActiveDataModule()
 })
 watch(
@@ -1298,13 +1583,11 @@ watch(() => store.selectedUnit?.id, (next, previous) => {
     clearFacilitySelection()
     setUnitStyle(next, 'selected')
   }
-  void renderInsulation()
-  void renderSoilResistivity()
-  void renderDcStrayCurrent()
-  void renderCoatingDamage()
-  void renderPipeGroundPotential()
-  void renderElectricContinuity()
-  void renderInletParameters()
+  if (selectedUnitRenderFrame !== null) cancelAnimationFrame(selectedUnitRenderFrame)
+  selectedUnitRenderFrame = requestAnimationFrame(() => {
+    selectedUnitRenderFrame = null
+    void renderActiveDataModule()
+  })
 })
 watch(() => store.hoveredUnit?.id, (next, previous) => {
   if (previous !== undefined && previous !== store.selectedUnit?.id) setUnitStyle(previous, 'default')
@@ -1317,12 +1600,19 @@ watch(() => store.selectedUnit, (unit) => {
   const distance = Math.hypot(current.getX() - center.width / 2, current.getY() - center.height / 2)
   if (distance < 50 && map.getZoom() >= DETAIL_ZOOM) return
   map.setZoomAndCenter(DETAIL_ZOOM, [unit.lng, unit.lat], false, 600)
-}, { deep: false })
+}, { deep: false, flush: 'post' })
 
 onBeforeUnmount(() => {
+  if (selectedUnitRenderFrame !== null) cancelAnimationFrame(selectedUnitRenderFrame)
   mapRef.value?.removeEventListener('mouseover', handleInspectionPhotoOver)
   mapRef.value?.removeEventListener('mouseout', handleInspectionPhotoOut)
+  mapRef.value?.removeEventListener('click', handleInspectionPhotoClick, true)
+  dataModuleCardLayerRef.value?.removeEventListener('mouseover', handleInspectionPhotoOver)
+  dataModuleCardLayerRef.value?.removeEventListener('mouseout', handleInspectionPhotoOut)
+  dataModuleCardLayerRef.value?.removeEventListener('click', handleInspectionPhotoClick, true)
+  clearElevatedDataModuleCards()
   removeInspectionPhotoPreview()
+  closeInspectionPhotoGallery()
   window.removeEventListener('themechange', handleThemeChange)
   window.removeEventListener('insulationdatachange', handleInsulationDataChange)
   window.removeEventListener('soilresistivitydatachange', handleSoilDataChange)
@@ -1342,6 +1632,8 @@ onBeforeUnmount(() => {
   if (store.selectedUnit) store.selectUnit(null)
   if (store.hoveredUnit) store.hoverUnit(null)
   infoWindow?.close()
+  map?.off?.('mapmove', positionElevatedDataModuleCards)
+  map?.off?.('zoomchange', positionElevatedDataModuleCards)
   map?.destroy()
   map = null
   AMapApi = null
@@ -1350,7 +1642,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="amap-main-wrapper">
-    <div ref="mapRef" id="map" class="amap-main-map"></div>
+    <div ref="mapRef" id="map" class="amap-main-map" :class="{ 'has-active-data-module': !!props.activeDataModule }"></div>
+    <div ref="dataModuleCardLayerRef" class="data-module-card-overlay-layer" aria-live="polite"></div>
     <div v-if="loading" class="amap-map-state">正在加载高德地图…</div>
     <div v-else-if="loadError" class="amap-map-state amap-map-error">
       <strong>地图加载失败</strong>

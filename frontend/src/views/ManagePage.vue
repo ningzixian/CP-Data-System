@@ -114,10 +114,10 @@ function latestInspection(unitId: number): string {
 }
 
 // ============== 加载 ==============
-async function loadAll() {
+async function loadAll(force = false) {
   const [net] = await Promise.all([
-    loadZhiwenNetworkData(),
-    store.loadAll(),
+    loadZhiwenNetworkData(force),
+    store.loadAll(force),
   ])
   const communityByUnit = Object.fromEntries(store.units.map((unit) => [unit.id, communityOfUnit(unit)]))
   const cp = projectCpData(store.units as any, store.records as any, communityByUnit)
@@ -133,7 +133,7 @@ async function loadAll() {
     topology: net.topology,
   }
 }
-onMounted(loadAll)
+onMounted(() => void loadAll())
 watch([unitSearch, unitStatusFilter, recordSearch, recordStatusFilter, recordItemFilter, recordUnitFilter, facilityTypeFilter, facilityCommunityFilter], resetPage)
 
 // ============== 概览统计 ==============
@@ -198,7 +198,7 @@ async function submitUnit() {
       ElMessage.success('已创建')
     }
     unitDialogVisible.value = false
-    await store.loadAll()
+    await store.loadAll(true)
   } catch (e: any) {
     ElMessage.error('保存失败：' + (e?.message || '未知错误'))
   }
@@ -207,7 +207,7 @@ async function deleteUnit(unit: CorrosionUnit) {
   try { await ElMessageBox.confirm(`确认删除「${unit.name}」及其全部检测记录？`, '提示', { type: 'warning' }) } catch { return }
   await unitsApi.remove(unit.id)
   ElMessage.success('已删除')
-  await store.loadAll()
+  await store.loadAll(true)
 }
 
 // ============== 检测记录 ==============
@@ -235,12 +235,12 @@ function openRecordDialog(mode: RecordDialogMode, record: InspectionRecord | nul
   activeRecord.value = record
   recordDialogVisible.value = true
 }
-async function handleRecordSaved() { await loadAll() }
+async function handleRecordSaved() { await store.loadAll(true) }
 async function deleteRecord(row: InspectionRecord) {
   try { await ElMessageBox.confirm(`确认删除「${row.item_name}」的记录？`, '提示', { type: 'warning' }) } catch { return }
   await recordsApi.remove(row.id)
   ElMessage.success('已删除')
-  await store.loadAll()
+  await store.loadAll(true)
 }
 
 watch(
@@ -275,7 +275,7 @@ async function submitPipeline() {
     await pipelinesApi.create(pipelineForm as any)
     ElMessage.success('已创建')
     pipelineDialogVisible.value = false
-    await store.loadAll()
+    await store.loadAll(true)
   } catch (e: any) {
     ElMessage.error('保存失败：' + (e?.message || '未知错误'))
   }
@@ -345,7 +345,7 @@ async function uploadExcel(req: any) {
     const r = await importApi.excel(req.file)
     ElMessage.success(`导入完成：成功 ${r.imported} 条，失败 ${r.errors.length} 条`)
     if (r.errors.length) console.warn('导入错误：', r.errors)
-    await store.loadAll()
+    await loadAll(true)
   } catch (e: any) {
     ElMessage.error('导入失败：' + (e?.message || '未知错误'))
   }
@@ -364,7 +364,7 @@ async function uploadExcel(req: any) {
         <el-upload :http-request="uploadExcel" :show-file-list="false" accept=".xlsx,.xls">
           <el-button :icon="Download" type="success" plain>📥 Excel 批量导入</el-button>
         </el-upload>
-        <el-button :icon="Refresh" @click="loadAll">刷新数据</el-button>
+        <el-button :icon="Refresh" @click="loadAll(true)">刷新数据</el-button>
       </div>
     </div>
 
