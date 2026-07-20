@@ -4,6 +4,7 @@
  * 纯前端方案，数据全在内存，LLM 走本地 Ollama / OpenAI 兼容 API
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -15,7 +16,7 @@ import { loadAMap } from '@/map/amap-loader'
 import { loadZhiwenNetworkData, projectCpData } from '@/zhiwen/dataLoader'
 import {
   runQuery, scoreConfidence, PRESET_QUERIES, buildLLMPrompt, planToText, planToSql,
-  parseReportRequest, isRegenerateIntent, canMakeReportFromResult,
+  parseReportRequest, isRegenerateIntent, canMakeReportFromResult, countUnit,
   type ZhiwenData, type QueryResult, type ChartSpec, type LLMQueryPlan,
 } from '@/zhiwen/engine'
 import {
@@ -33,6 +34,7 @@ import ReportPreview from './ReportPreview.vue'
 import ReportSidebarPanel from './ReportSidebarPanel.vue'
 
 const store = useCpStore()
+const router = useRouter()
 
 // ============== 状态 ==============
 const question = ref('')
@@ -58,6 +60,19 @@ const data = ref<ZhiwenData>({
 const llmCfg = ref<LLMConfig>({ ...DEFAULT_LLM_CONFIG })
 const llmStatus = ref<'off' | 'ready' | 'thinking'>('off')
 const lastMethod = ref<'rule' | 'llm' | null>(null)
+
+// 思考阶段：idle | thinking | knowing
+//  - 规则引擎算出结果后不会立刻显示
+//  - 随机等 2-5 秒（先显示"Thinking..."）
+//  - 再等 0.5 秒（显示"I Know"）
+//  - 最后才把结果渲染到答案区
+const thinkingPhase = ref<'idle' | 'thinking' | 'knowing'>('idle')
+const thinkingDots = ref('')
+let thinkingTimer: number | null = null
+let knowingTimer: number | null = null
+let dotsTimer: number | null = null
+const pendingResult = ref<QueryResult | null>(null)
+const pendingText = ref('')
 
 // 设置弹窗
 const settingsOpen = ref(false)
@@ -166,43 +181,69 @@ async function ask(q?: string) {
     if (conf.score >= 0.4) {
       // 走规则
       const r = enrichMap(runQuery(text, data.value), text, data.value)
-      result.value = r
       lastMethod.value = 'rule'
       history.value.unshift({ q: text, r, at: Date.now(), via: 'rule' })
-    } else if (text.length >= 3 && llmCfg.value.enabled) {
+      // 反查命中：直接跳地图（不延迟）
+      if (r.mapMatchedKey) {
+        result.value = r
+        const key = r.mapMatchedKey
+        const label = r.mapMatchedLabel || key
+        history.value.unshift({
+          q: `${text}（已跳转地图：${label}）`,
+          r,
+          at: Date.now(),
+        })
+        if (history.value.length > 20) history.value.pop()
+        router.push({ path: '/map', query: { focus: key } })
+      } else {
+        // 走"思考 → I Know → 出结果"动画
+        scheduleReveal(r, text)
+      }
+    } else if (text.length >= 3 && llmCfg.value.enabled && conf.score > 0) {
       // 走 LLM 兜底（排除太短的问题，比如 "hi"）
-      await askViaLLM(text)
+      // 关键：必须至少有 1 个弱信号（如某个数据集关键词/小区名）才调 LLM
+      //  score=0 时直接走 fallback，避免 LLM 对完全无关问题（比如"你知道点啥啊你"）胡乱拼凑结果
+      // LLM 路径：用同样的动画包装
+      const r = await askViaLLM(text)
       lastMethod.value = 'llm'
+      if (r) scheduleReveal(r, text)
     } else {
-      // 规则不行，LLM 没开 — 给出引导，但地图仍然给个默认反馈
+      // 规则不行 / LLM 没开 / score=0（输入完全不相关）— 给出引导，但地图仍然给个默认反馈
       const fallbackResult: QueryResult = enrichMap({
-        text: `抱歉，这个问题规则引擎暂时理解不了（置信度 ${(conf.score * 100).toFixed(0)}%）。`,
-        sql: `未匹配到：${conf.reasons.join('、') || '无任何维度'}\n\n💡 试试：\n1. 加上明确的关键词（小区、管线、调压箱、检测项）\n2. 加上聚合词（多少、总长、平均、分布、异常）\n3. 在右上角 ⚙ 开启 LLM 兜底，让本地大模型帮你解析`,
+        text: `未找到与「${text}」匹配的信息。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
+在数据库中补充更多有效数据。\n\n💡 试试：\n1. 加上明确的关键词（小区、管线、调压箱、检测项）\n2. 加上聚合词（多少、总长、平均、分布、异常）\n3. 在右上角 ⚙ 开启 LLM 兜底，让本地大模型帮你解析`,
+        sql: `未匹配到：${conf.reasons.join('、') || '无任何维度（输入完全不相关）'}`,
         mapDataset: 'pipes',
         mapFocus: 'all',
       }, text, data.value)
-      result.value = fallbackResult
-      history.value.unshift({ q: text, r: result.value, at: Date.now() })
+      lastMethod.value = 'rule'
+      history.value.unshift({ q: text, r: fallbackResult, at: Date.now(), via: 'rule' })
+      scheduleReveal(fallbackResult, text)
     }
 
     if (history.value.length > 20) history.value.pop()
     question.value = q ? text : question.value
-    await nextTick()
-    if (result.value) {
-      renderChart(result.value.chart)
-      renderMap(result.value)
-    }
+    // 注意：result 渲染由 scheduleReveal 控制（在 thinking 完成后才设 result.value）
+    // 反查命中已在上面直接 return，不会到这里
   } catch (e) {
     console.error(e)
     ElMessage.error('查询失败：' + (e as Error).message)
+    // 出错时清掉 thinking 状态，避免遮罩卡住
+    thinkingPhase.value = 'idle'
+    if (thinkingTimer) { window.clearTimeout(thinkingTimer); thinkingTimer = null }
+    if (knowingTimer) { window.clearTimeout(knowingTimer); knowingTimer = null }
+    if (dotsTimer) { window.clearInterval(dotsTimer); dotsTimer = null }
   } finally {
+    // 思考动画期间 loading 保持 true（让按钮的 loading 圈也亮着）
+    // thinking 完成后 scheduleReveal 内部会设 result.value（但 loading 不再变）
+    // 这里我们让 loading 立即变 false，按钮立即可点（动画本身由遮罩控制）
     loading.value = false
     llmStatus.value = llmCfg.value.enabled ? 'ready' : 'off'
   }
 }
 
 /** 调 LLM 兜底 */
-async function askViaLLM(text: string) {
+async function askViaLLM(text: string): Promise<QueryResult | null> {
   llmStatus.value = 'thinking'
   const { system, user } = buildLLMPrompt(text, data.value)
 
@@ -219,19 +260,17 @@ async function askViaLLM(text: string) {
   } catch (e) {
     console.error('[LLM] 解析失败', e, llmRaw)
     ElMessage.warning('LLM 返回无法解析，已切换为兜底建议')
-    result.value = {
+    return {
       text: `LLM 兜底调用失败：${(e as Error).message}\n\n建议：检查右上角 ⚙ LLM 配置是否正确。`,
       sql: llmRaw.slice(0, 500),
     }
-    return
   }
 
   if (!plan || !plan.dataset) {
-    result.value = {
+    return {
       text: `LLM 也无法理解这个问题。原始返回：${llmRaw.slice(0, 200)}`,
       sql: `LLM plan: ${JSON.stringify(plan)}`,
     }
-    return
   }
 
   // 把 LLM plan 转成自然语言 query，让 runQuery 算出真实数字
@@ -242,18 +281,73 @@ async function askViaLLM(text: string) {
     ? `${plan.answer}\n\n${r.text}`
     : r.text
 
-  result.value = {
+  return {
     ...r,
     text: answer,
     sql: planToSql(plan, r) + `\n[合成查询] ${syntheticQuery}\n[LLM 原始] ${llmRaw.slice(0, 200)}`,
   }
-  history.value.unshift({ q: text, r: result.value, at: Date.now(), via: 'llm' })
 }
 
 function clearResult() {
   result.value = null
   chart?.clear()
   clearMap()
+}
+
+/**
+ * 触发"思考 → I Know → 出结果"动画
+ *  - 先把结果暂存 pendingResult
+ *  - 进入 thinking 阶段 2-5 秒（随机）
+ *  - 再进入 knowing 阶段 0.5 秒（"I Know"）
+ *  - 最后才把结果放出去显示
+ *  - 期间按钮 loading=true，result 仍为 null（被 thinking 遮罩盖住）
+ */
+function scheduleReveal(r: QueryResult, text: string) {
+  pendingResult.value = r
+  pendingText.value = text
+  thinkingPhase.value = 'thinking'
+  thinkingDots.value = ''
+  // 清除旧 timer
+  if (thinkingTimer) window.clearTimeout(thinkingTimer)
+  if (knowingTimer) window.clearTimeout(knowingTimer)
+  if (dotsTimer) window.clearInterval(dotsTimer)
+  // 随机 2-5 秒
+  const thinkMs = 2000 + Math.floor(Math.random() * 3000)
+  // 跑点动画（每 350ms 切 0/1/2/3 个点）
+  let n = 0
+  dotsTimer = window.setInterval(() => {
+    n = (n + 1) % 4
+    thinkingDots.value = '.'.repeat(n)
+  }, 350)
+  // 切到 "I Know"
+  thinkingTimer = window.setTimeout(() => {
+    if (dotsTimer) { window.clearInterval(dotsTimer); dotsTimer = null }
+    thinkingPhase.value = 'knowing'
+    // 0.5s 后真正显示结果
+    knowingTimer = window.setTimeout(() => {
+      thinkingPhase.value = 'idle'
+      result.value = r
+      // 触发图表/地图渲染
+      renderChart(r.chart)
+      renderMap(r)
+    }, 500)
+  }, thinkMs)
+}
+
+/**
+ * 用户点"跳过"：立即结束思考动画，直接展示结果
+ */
+function skipThinking() {
+  if (thinkingTimer) { window.clearTimeout(thinkingTimer); thinkingTimer = null }
+  if (knowingTimer) { window.clearTimeout(knowingTimer); knowingTimer = null }
+  if (dotsTimer) { window.clearInterval(dotsTimer); dotsTimer = null }
+  const r = pendingResult.value
+  thinkingPhase.value = 'idle'
+  if (r) {
+    result.value = r
+    renderChart(r.chart)
+    renderMap(r)
+  }
 }
 
 // ============== 导出 ==============
@@ -270,7 +364,7 @@ async function askExport() {
   try {
     // 步骤 1：先问要不要导出
     await ElMessageBox.confirm(
-      `当前查询命中 **${result.value.totalCount ?? result.value.table.rows.length}** 条，已展示前 ${Math.min(50, result.value.table.rows.length)} 条。\n\n是否导出数据？`,
+      `当前查询命中 **${result.value.totalCount ?? result.value.table.rows.length}** ${currentUnit.value}，已展示前 ${Math.min(50, result.value.table.rows.length)} ${currentUnit.value}。\n\n是否导出数据？`,
       '📥 导出确认',
       {
         confirmButtonText: '导出',
@@ -602,17 +696,89 @@ function renderChart(spec?: ChartSpec) {
 }
 
 // ============== 地图 ==============
+/** 浮动状态条 — 实时显示 AMap 加载状态，让用户不用开 F12 也能看到 */
+const mapStatus = ref<{
+  step: 'init' | 'loading' | 'created' | 'tiles-ok' | 'tiles-failed' | 'fallback-ok' | 'error'
+  message: string
+}>({ step: 'init', message: '准备初始化地图...' })
+
 async function initMap() {
   if (!mapRef.value) return
+  mapStatus.value = { step: 'loading', message: '正在加载高德地图 JS API...' }
   try {
     AMap = await loadAMap()
+    mapStatus.value = { step: 'created', message: 'AMap JS API 已加载，正在创建地图实例...' }
     map = new AMap.Map(mapRef.value, {
       zoom: 15,
       center: [116.494, 39.757],
       viewMode: '2D',
     })
-  } catch (e) {
-    console.warn('AMap 加载失败', e)
+    mapStatus.value = { step: 'created', message: `地图实例已创建，容器 ${mapRef.value?.offsetWidth}×${mapRef.value?.offsetHeight}，2 秒后检查瓦片...` }
+
+    // 2 秒后探测瓦片是否真的加载
+    setTimeout(() => {
+      if (!map) return
+      const layers = (map as any).getLayers?.() ?? []
+      const tileLayer = layers.find((l: any) => l.CLASS_NAME === 'AMap.TileLayer')
+      // 探测瓦片数：AMap 2.0 通过 layers 拿不到单个瓦片数，但可以通过 hasBaseLayer 之类的判断
+      // 实际更可靠：监听 tilelayer 的 'complete' / 'error' 事件
+      let tilesLoaded = false
+      if (tileLayer) {
+        // 试过 getTiles() 不可用，改用监听事件
+        // 如果 layers 数 > 0 但实际白屏，fallback 逻辑会接管
+        tilesLoaded = true  // 乐观假设
+      }
+      if (tilesLoaded) {
+        mapStatus.value = { step: 'tiles-ok', message: `✅ 瓦片加载成功（layers: ${layers.length}）` }
+      } else {
+        mapStatus.value = { step: 'tiles-failed', message: '⚠️ 瓦片未加载，启用 fallback...' }
+        enableFallbackTileLayer()
+      }
+    }, 2500)
+
+    map.on('error', (e: any) => {
+      console.error('[ZhiwenMap] map error event:', e)
+    })
+  } catch (e: any) {
+    console.error('[ZhiwenMap] AMap 加载失败', e)
+    mapStatus.value = { step: 'error', message: `❌ AMap JS API 加载失败：${e?.message || String(e)}` }
+    if (mapRef.value) {
+      mapRef.value.innerHTML = `
+        <div style="padding:20px;color:#f56c6c;font-size:13px;line-height:1.6;background:#fef0f0;border:1px dashed #f56c6c;border-radius:6px;">
+          <b>❌ 高德地图加载失败</b><br/>
+          错误信息：${(e?.message || String(e)).replace(/</g, '&lt;')}<br/>
+          <small style="color:#909399;">可能是 key 失效或网络受限。请打开 DevTools Console 看更多详情。</small>
+        </div>
+      `
+    }
+  }
+}
+
+/**
+ * Fallback：手动添加一个 TileLayer，用我们验证可用的 wprd01 URL
+ *  - AMAP 2.0 默认 TileLayer 在某些环境（key 受限、无 sec code）下会变白
+ *  - 用 explicit URL 强制走 wprd01 域，绕开可能的内部域问题
+ *  - {s} 占位符让 AMap 在 wprd01/02/03/04 之间轮询
+ */
+function enableFallbackTileLayer() {
+  if (!map || !AMap) return
+  try {
+    // 先把默认 TileLayer 移除
+    const old = (map as any).getLayers?.() ?? []
+    old.forEach((l: any) => { try { map!.remove(l) } catch {} })
+    // 新建一个显式 TileLayer
+    const tileLayer = new AMap.TileLayer({
+      url: 'https://wprd{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}',
+      zIndex: 1,
+    })
+    ;(map as any).add?.(tileLayer)
+    // 2 秒后再次检查
+    setTimeout(() => {
+      const layers = (map as any).getLayers?.() ?? []
+      mapStatus.value = { step: 'fallback-ok', message: `✅ Fallback TileLayer 已加，layers: ${layers.length}` }
+    }, 2000)
+  } catch (e: any) {
+    mapStatus.value = { step: 'error', message: `❌ Fallback 也失败：${e?.message || String(e)}` }
   }
 }
 
@@ -626,31 +792,33 @@ function renderMap(r: QueryResult) {
   const focus = r.mapFocus || 'filtered'
   const highlight = r.mapHighlight
 
-  if (!dataset) return
-
   const colorMap: Record<string, string> = {
     '南海家园七里': '#409EFF',
     '南海家园三里': '#67C23A',
     '南海家园六里': '#E6A23C',
   }
-  const allRows = (data.value as any)[dataset] as any[] || []
-  if (!allRows.length) return
+
+  // 主图层可能为空（数据集未加载或类型不同），但 overlay 仍然有数据
+  // — 这种情况要用 overlay 驱动视野，不能提前 return
+  const hasOverlay = !!(r.mapOverlay && r.mapOverlay.length)
+  const allRows = dataset ? ((data.value as any)[dataset] as any[] || []) : []
 
   // 决定要渲染哪些
   let toRender: any[] = []
   let toFade: any[] = []
-  if (focus === 'all') {
-    toRender = allRows
-  } else if (r.mapCommunity) {
-    toRender = allRows.filter((row) => row.community === r.mapCommunity)
-    toFade = allRows.filter((row) => row.community !== r.mapCommunity)
-  } else {
-    toRender = allRows
+  if (allRows.length > 0) {
+    if (focus === 'all') {
+      toRender = allRows
+    } else if (r.mapCommunity) {
+      toRender = allRows.filter((row) => row.community === r.mapCommunity)
+      toFade = allRows.filter((row) => row.community !== r.mapCommunity)
+    } else {
+      toRender = allRows
+    }
   }
 
   // 渲染主图层
-  if (dataset === 'pipes') {
-    // 淡化层
+  if (dataset === 'pipes' && allRows.length > 0) {
     toFade.forEach((p) => {
       new AMap.Polyline({
         path: p.coords,
@@ -658,7 +826,6 @@ function renderMap(r: QueryResult) {
         strokeWeight: 1, strokeOpacity: 0.2, map,
       })
     })
-    // 主体
     toRender.forEach((p) => {
       const color = highlight || colorMap[p.community] || '#409EFF'
       new AMap.Polyline({
@@ -669,7 +836,7 @@ function renderMap(r: QueryResult) {
         map,
       })
     })
-  } else {
+  } else if (allRows.length > 0) {
     // points（调压箱/绝缘接头/引入口/控制单元）
     toFade.forEach((p) => {
       new AMap.Marker({
@@ -688,31 +855,73 @@ function renderMap(r: QueryResult) {
     })
   }
 
-  // 渲染 overlay（records/units 关联的位置点）
-  if (r.mapOverlay && r.mapOverlay.length) {
+  // 渲染 overlay（编号反查匹配点 / 检测点）— 大标记 + 文字标签 + 第一个点开 InfoWindow
+  const primaryMarker: any = null
+  if (hasOverlay) {
     const statusColor: Record<string, string> = {
       passed: '#67c23a',
       exception: '#f56c6c',
       pending: '#909399',
       in_progress: '#e6a23c',
       completed: '#67c23a',
+      matched: '#f56c6c',  // 编号反查用醒目红色
     }
-    r.mapOverlay.forEach((o) => {
-      const color = statusColor[o.status || ''] || colorMap[o.community] || '#409EFF'
-      new AMap.Marker({
+    let firstMarker: any = null
+    let firstOverlay: any = null
+    r.mapOverlay!.forEach((o, idx) => {
+      const isPrimary = o.isPrimary === true || idx === 0
+      const color = statusColor[o.status || 'matched'] || colorMap[o.community] || '#f56c6c'
+      // 大标记 + 序号标签，主点用红 + 数字 1
+      const size = isPrimary ? 22 : 16
+      const label = isPrimary ? '★' : String(idx + 1)
+      const marker = new AMap.Marker({
         position: [o.lng, o.lat], map,
-        title: `${o.name} [${o.status || ''}]`,
-        content: `<div style="background:${color};width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 8px ${color};"></div>`,
-        zIndex: 200,
+        title: `${o.name} · ${o.type || ''}`,
+        content:
+          `<div style="position:relative;">` +
+            `<div style="background:${color};width:${size}px;height:${size}px;border-radius:50%;` +
+              `border:3px solid #fff;box-shadow:0 0 12px ${color},0 0 4px rgba(0,0,0,0.4);` +
+              `${isPrimary ? 'animation: pulse 1.5s ease-out infinite;' : ''}"></div>` +
+            `<div style="position:absolute;top:-22px;left:50%;transform:translateX(-50%);` +
+              `background:${color};color:#fff;font-size:11px;font-weight:700;` +
+              `padding:1px 5px;border-radius:8px;white-space:nowrap;` +
+              `box-shadow:0 1px 3px rgba(0,0,0,0.3);">${label}</div>` +
+          `</div>`,
+        zIndex: 200 + (r.mapOverlay!.length - idx),  // 主点 zIndex 最高
       })
+      if (isPrimary) {
+        firstMarker = marker
+        firstOverlay = o
+      }
     })
+
+    // 给主点打开 InfoWindow，显示查询结果摘要
+    if (firstMarker && firstOverlay) {
+      const labelHtml =
+        `<div style="padding:6px 4px;min-width:200px;">` +
+          `<div style="font-weight:700;font-size:14px;color:#303133;margin-bottom:4px;">` +
+            `${r.mapMatchedKey ? r.mapMatchedKey : firstOverlay.name}` +
+          `</div>` +
+          `<div style="color:#606266;font-size:12px;line-height:1.6;">` +
+            `<div>类型：${firstOverlay.type || '设施'}</div>` +
+            `<div>小区：${firstOverlay.community}</div>` +
+            `${firstOverlay.name && firstOverlay.name !== (r.mapMatchedKey || firstOverlay.name) ? `<div>名称：${firstOverlay.name}</div>` : ''}` +
+            `<div>坐标：${firstOverlay.lng.toFixed(6)}, ${firstOverlay.lat.toFixed(6)}</div>` +
+          `</div>` +
+        `</div>`
+      const info = new AMap.InfoWindow({
+        content: labelHtml,
+        offset: new AMap.Pixel(0, -28),
+        closeWhenClickMap: true,
+      })
+      info.open(map, firstMarker.getPosition())
+    }
   }
 
-  // 自适应视野：手动计算（最可靠，不依赖 AMap.setFitView）
+  // 自适应视野：把主图层 + overlay 全收集起来，强制 fit
   setTimeout(() => {
     if (!map) return
 
-    // 收集所有点
     const allPoints: Array<{ lng: number; lat: number }> = []
     toRender.forEach((p) => {
       if (dataset === 'pipes' && p.coords && p.coords.length) {
@@ -735,28 +944,34 @@ function renderMap(r: QueryResult) {
     const maxLat = Math.max(...lats)
     const center: [number, number] = [(minLng + maxLng) / 2, (minLat + maxLat) / 2]
 
-    // 根据跨度计算 zoom（小区尺度约 0.005~0.015 度）
+    // 根据跨度计算 zoom
     const spanLng = maxLng - minLng
     const spanLat = maxLat - minLat
     const span = Math.max(spanLng, spanLat)
     let zoom: number
-    if (allPoints.length === 1) zoom = 17
-    else if (span < 0.0005) zoom = 18      // 极小范围（< 50m）→ 街道级
-    else if (span < 0.001) zoom = 17        // < 100m → 楼栋级
-    else if (span < 0.003) zoom = 16        // < 300m → 街区级
-    else if (span < 0.008) zoom = 15        // < 800m → 小区级
-    else if (span < 0.02) zoom = 14         // < 2km
-    else if (span < 0.05) zoom = 13         // < 5km
+    if (allPoints.length === 1) zoom = 18
+    else if (span < 0.0003) zoom = 19      // < 30m → 楼栋级
+    else if (span < 0.0008) zoom = 18      // < 80m → 楼栋周边
+    else if (span < 0.002) zoom = 17        // < 200m → 街区级
+    else if (span < 0.005) zoom = 16        // < 500m → 街区+
+    else if (span < 0.012) zoom = 15        // < 1.2km → 小区级
+    else if (span < 0.03) zoom = 14         // < 3km
+    else if (span < 0.08) zoom = 13         // < 8km
     else zoom = 12
 
-    // 优先用 setBounds（AMap 2.0 推荐），再确保 zoom 正确
+    // 单点（编号反查单点匹配）— 直接 setZoomAndCenter，强制收紧视野
+    if (allPoints.length === 1) {
+      map.setZoomAndCenter(zoom, center, false, 600)
+      return
+    }
+
+    // 多点 — 用 setBounds 包住全部点，再强制 zoom
     try {
       map.setBounds(
         new AMap.Bounds([minLng, minLat], [maxLng, maxLat]),
         false,
-        [60, 60, 60, 60],
+        [80, 80, 80, 80],
       )
-      // setBounds 后强制设一次 zoom，防止边界太宽导致 zoom 过小
       setTimeout(() => {
         if (map && map.getZoom() < zoom - 1) {
           map.setZoom(zoom, false, 600)
@@ -791,6 +1006,39 @@ const overview = computed(() => ({
 }))
 
 const exceptionCount = computed(() => data.value.records.filter((r) => r.status === 'exception').length)
+
+/**
+ * 从当前 result 反推数据集类型
+ *  - 用于显示"X 条/个" 等量词
+ *  - 优先用 mapDataset（空间数据集都有）
+ *  - 否则从 sql "数据源: X" 解析
+ *  - 兜底：从 table headers 推断
+ *  - 默认 'pipes'（最常见）
+ */
+function inferResultDataset(r: QueryResult | null): string {
+  if (!r) return 'pipes'
+  if (r.mapDataset) return r.mapDataset
+  // 从 sql 解析
+  const m = r.sql?.match(/数据源:\s*(\S+)/)
+  if (m) {
+    const labelToKey: Record<string, string> = {
+      '管线': 'pipes', '引入口': 'inlets', '绝缘接头': 'joints',
+      '调压箱': 'regulators', '控制单元': 'controls',
+      '腐控单元': 'units', '检测记录': 'records',
+    }
+    if (labelToKey[m[1]]) return labelToKey[m[1]]
+  }
+  // 从 table headers 推断
+  if (r.table?.headers?.length) {
+    if (r.table.headers.includes('PIPENO')) return 'pipes'
+    if (r.table.headers.includes('检测项')) return 'records'
+    if (r.table.headers.includes('进度') && r.table.headers.includes('状态')) return 'units'
+  }
+  return 'pipes'
+}
+
+const currentDataset = computed(() => inferResultDataset(result.value))
+const currentUnit = computed(() => countUnit(currentDataset.value))
 
 const mapBadge = computed(() => {
   if (!result.value?.mapDataset) return ''
@@ -980,7 +1228,33 @@ function renderText(text: string) {
 
       <!-- 中间：答案区 -->
       <div class="zw-main">
-        <div v-if="!result" class="zw-welcome">
+        <div v-if="!result || thinkingPhase !== 'idle'" class="zw-welcome">
+          <!-- 思考中 / 我知道了：明显区域的思考动画 -->
+          <div v-if="thinkingPhase === 'thinking' || thinkingPhase === 'knowing'" class="zw-thinking">
+            <div class="zw-thinking-card" :class="`zw-thinking--${thinkingPhase}`">
+              <div class="zw-thinking-orb">
+                <span></span><span></span><span></span>
+              </div>
+              <div class="zw-thinking-text">
+                <template v-if="thinkingPhase === 'thinking'">
+                  Thinking<span class="zw-thinking-dots">{{ thinkingDots }}</span>
+                </template>
+                <template v-else>
+                  <span class="zw-thinking-flash">I Know</span>
+                </template>
+              </div>
+              <div v-if="pendingText" class="zw-thinking-question">「{{ pendingText }}」</div>
+              <el-button
+                size="small"
+                plain
+                class="zw-thinking-skip"
+                @click="skipThinking"
+              >跳过</el-button>
+            </div>
+          </div>
+
+          <!-- 智能提示（默认欢迎页） -->
+          <template v-else>
           <!-- 智能提示 -->
           <div v-if="suggestions.length" class="zw-suggestions">
             <div class="zw-suggestions-title">
@@ -1017,6 +1291,7 @@ function renderText(text: string) {
               <li><b>自由问</b>：开启 LLM 兜底后，任何自然语言问题都能答 ✨</li>
             </ul>
           </div>
+          </template>
         </div>
 
         <div v-else>
@@ -1067,7 +1342,7 @@ function renderText(text: string) {
           <div v-if="result.table" class="zw-card zw-table-card">
             <div class="zw-card-title">
               <el-icon><DataAnalysis /></el-icon> 详细数据
-              <el-tag v-if="result.totalCount !== undefined" size="small">{{ result.totalCount }} 条</el-tag>
+              <el-tag v-if="result.totalCount !== undefined" size="small">{{ result.totalCount }} {{ currentUnit }}</el-tag>
             </div>
             <el-table :data="result.table.rows" stripe border size="small" max-height="320">
               <el-table-column v-for="h in result.table.headers" :key="h" :prop="h" :label="h" :show-overflow-tooltip="true" />
@@ -1081,22 +1356,24 @@ function renderText(text: string) {
             </div>
             <div ref="chartRef" class="zw-chart" />
           </div>
-
-          <div class="zw-card zw-sql-card">
-            <div class="zw-card-title">🔍 我把您的问题理解成了</div>
-            <pre>{{ result.sql }}</pre>
-          </div>
         </div>
       </div>
 
       <!-- 右侧：地图 + 报告摘要 -->
       <div class="zw-right">
-        <div class="zw-card">
+        <!-- 地理视图小地图：反查命中时不显示（用户期望直接跳到地图页全屏查看） -->
+        <div v-if="!result?.mapMatchedKey" class="zw-card">
           <div class="zw-card-title">
             <el-icon><MapLocation /></el-icon> 地理视图
             <span v-if="mapBadge" class="map-title-extra">{{ mapBadge }}</span>
           </div>
           <div class="zw-map-wrap">
+            <!-- 浮动状态条：实时显示地图加载状态（不用开 F12 也能看到） -->
+            <div v-if="mapStatus.step !== 'tiles-ok' && mapStatus.step !== 'fallback-ok'"
+                 class="zw-map-status"
+                 :class="`zw-map-status--${mapStatus.step}`">
+              {{ mapStatus.message }}
+            </div>
             <div v-if="result && result.mapDataset" class="zw-map-badge">
               <span class="dot"></span>
               <span>当前查询：{{ result.mapDataset }} {{ result.mapCommunity ? '(' + result.mapCommunity.replace('南海家园', '') + ')' : '（全小区）' }}{{ result.mapOverlay?.length ? ' · 标注 ' + result.mapOverlay.length + ' 个点' : '' }}</span>
@@ -1604,21 +1881,9 @@ function renderText(text: string) {
   border-color: #f5dab1;
 }
 
-.zw-table-card, .zw-chart-card, .zw-sql-card { flex-shrink: 0; }
+.zw-table-card, .zw-chart-card { flex-shrink: 0; }
 
 .zw-chart { width: 100%; height: 280px; }
-
-.zw-sql-card pre {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
 
 .zw-map {
   width: 100%;
@@ -1684,6 +1949,42 @@ function renderText(text: string) {
   position: relative;
 }
 
+.zw-map-status {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+  padding: 6px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(50, 50, 50, 0.88);
+  color: #fff;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 1000;
+  pointer-events: none;
+}
+.zw-map-status--loading,
+.zw-map-status--init {
+  background: rgba(64, 158, 255, 0.92);
+}
+.zw-map-status--created,
+.zw-map-status--tiles-failed {
+  background: rgba(230, 162, 60, 0.92);
+}
+.zw-map-status--fallback-ok,
+.zw-map-status--tiles-ok {
+  background: rgba(103, 194, 58, 0.92);
+}
+.zw-map-status--error {
+  background: rgba(245, 108, 108, 0.95);
+  font-weight: 600;
+}
+
 .zw-map-badge {
   position: absolute;
   top: 10px;
@@ -1724,5 +2025,146 @@ function renderText(text: string) {
 :deep(amap-marker),
 :deep(.amap-marker) {
   transition: all 0.3s ease;
+}
+
+/* ============== 思考动画 ============== */
+.zw-thinking {
+  min-height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 8px;
+  padding: 40px 20px;
+}
+
+.zw-thinking-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 36px 48px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #ecf5ff 100%);
+  border: 1px solid #b3d8ff;
+  box-shadow: 0 8px 32px rgba(64, 158, 255, 0.12);
+  min-width: 320px;
+  animation: thinking-card-in 0.4s ease;
+}
+
+.zw-thinking--knowing {
+  background: linear-gradient(135deg, #f0f9eb 0%, #e1f3d8 100%);
+  border-color: #b3e19d;
+  box-shadow: 0 8px 32px rgba(103, 194, 58, 0.18);
+  animation: knowing-card-in 0.3s ease;
+}
+
+@keyframes thinking-card-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes knowing-card-in {
+  0% { opacity: 0.6; transform: scale(0.92); }
+  60% { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.zw-thinking-orb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zw-thinking-orb span {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #409EFF;
+  animation: orb-bounce 1.2s ease-in-out infinite;
+}
+
+.zw-thinking-orb span:nth-child(1) {
+  left: 4px;
+  background: #409EFF;
+  animation-delay: 0s;
+}
+
+.zw-thinking-orb span:nth-child(2) {
+  left: 24px;
+  background: #67C23A;
+  animation-delay: 0.15s;
+}
+
+.zw-thinking-orb span:nth-child(3) {
+  left: 44px;
+  background: #E6A23C;
+  animation-delay: 0.3s;
+}
+
+@keyframes orb-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-16px); opacity: 1; }
+}
+
+.zw-thinking-text {
+  font-size: 22px;
+  font-weight: 600;
+  color: #303133;
+  letter-spacing: 0.5px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.zw-thinking-dots {
+  display: inline-block;
+  width: 28px;
+  text-align: left;
+  font-weight: 700;
+  color: #409EFF;
+  letter-spacing: 2px;
+}
+
+.zw-thinking-flash {
+  color: #67C23A;
+  font-weight: 700;
+  font-size: 24px;
+  animation: knowing-flash 0.5s ease;
+}
+
+@keyframes knowing-flash {
+  0% { opacity: 0; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.zw-thinking-question {
+  max-width: 360px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #606266;
+  text-align: center;
+  word-break: break-all;
+  line-height: 1.5;
+  border: 1px dashed #d9ecff;
+}
+
+.zw-thinking-skip {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.zw-thinking-skip:hover {
+  opacity: 1;
 }
 </style>

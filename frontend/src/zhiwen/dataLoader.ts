@@ -5,7 +5,7 @@
  * 复用 csv.ts 的 WKT 解析，保留所有原始字段。
  */
 
-import { parseCSV, parseWKTPoint, parseWKTLine } from '@/utils/csv'
+import { parseCSV, parseWKTPoint, parseWKTLine, parseWKTPolygon } from '@/utils/csv'
 import { loadTopologyData, mergeTopology, type TopologyData } from './topologyLoader'
 import type { PipeRow, PointRow, UnitRow, RecordRow, ZhiwenData } from './engine'
 
@@ -41,12 +41,28 @@ function parsePipes(community: string, text: string): PipeRow[] {
 
 function parsePoints(community: string, text: string, type: PointRow['type']): PointRow[] {
   return parseCSV(text).map((r) => {
-    const pt = parseWKTPoint(r.WKT) || [0, 0]
+    // 控制单元是 MULTIPOLYGON（面），需要算中心点
+    // 其他设施是 MULTIPOINT，直接取经纬度
+    let lng = 0
+    let lat = 0
+    const pt = parseWKTPoint(r.WKT)
+    if (pt) {
+      lng = pt[0]
+      lat = pt[1]
+    } else {
+      // 尝试解析多边形，取第一个外环的质心作为代表点
+      const rings = parseWKTPolygon(r.WKT)
+      if (rings.length > 0 && rings[0].length > 0) {
+        const centroid = polygonCentroid(rings[0])
+        lng = centroid[0]
+        lat = centroid[1]
+      }
+    }
     return {
       community,
       fid: parseInt(r.fid) || 0,
-      lng: pt[0],
-      lat: pt[1],
+      lng,
+      lat,
       ecode: r.ECODE || '',
       name: r.NAME || '',
       type,
@@ -54,6 +70,22 @@ function parsePoints(community: string, text: string, type: PointRow['type']): P
       pipeno: r.PIPENO || '',
     }
   })
+}
+
+/**
+ * 计算多边形外环的质心（顶点平均）
+ *  - 控制单元是多边形面，没有单点坐标
+ *  - 用顶点平均算一个代表点（足够精确到能定位到楼栋周边）
+ *  - 地球曲率忽略不计，因为控制单元范围都很小
+ */
+function polygonCentroid(ring: Array<[number, number]>): [number, number] {
+  let sumLng = 0
+  let sumLat = 0
+  for (const [lng, lat] of ring) {
+    sumLng += lng
+    sumLat += lat
+  }
+  return [sumLng / ring.length, sumLat / ring.length]
 }
 
 /** 加载全部管网原始数据（含物探拓扑数据） */

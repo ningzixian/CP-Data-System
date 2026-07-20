@@ -6,8 +6,8 @@ import { useCpStore } from '@/stores/cp'
 import { loadAMap } from '@/map/amap-loader'
 import { escapeHtml as e } from '@/utils/html'
 import { inletInsulationReadings, insulationPhotoOwnerKey } from '@/utils/insulation'
-import { listInsulationPhotos } from '@/utils/insulationPhotos'
-import { listInspectionPhotos } from '@/utils/inspectionPhotos'
+import { listInsulationPhotos, type InsulationPhotoRecord } from '@/utils/insulationPhotos'
+import { listInspectionPhotos, type InspectionPhotoRecord } from '@/utils/inspectionPhotos'
 import { hasSoilCoordinates, soilPhotoOwnerKey, soilResistivityPoints } from '@/utils/soilResistivity'
 import { dcStrayCurrentPoints, dcStrayPhotoOwnerKey, hasDcStrayCoordinates } from '@/utils/dcStrayCurrent'
 import { coatingDamagePhotoOwnerKey, coatingDamagePoints, hasCoatingDamageCoordinates } from '@/utils/coatingDetect'
@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'community-focus', name: string): void
   (e: 'view-mode', mode: 'community' | 'detail'): void
   (e: 'clear-data-module'): void
+  (e: 'ready'): void  // AMap 加载完成，MapPage 收到后才能调 focusOnFacility
 }>()
 
 export type FacilityKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet'
@@ -468,12 +469,12 @@ async function renderInsulation() {
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletInsulationReadings(record)
 
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
+  const photoEntries = await Promise.all(inlets.map(async (inlet): Promise<[number, InsulationPhotoRecord[]]> => {
     try {
-      return [inlet.fid, await listInsulationPhotos(insulationPhotoOwnerKey(unitId, inlet.fid))] as const
+      return [inlet.fid, await listInsulationPhotos(insulationPhotoOwnerKey(unitId, inlet.fid))]
     } catch (error) {
       console.warn(`[Insulation] 引入口 ${inlet.ecode || inlet.fid} 照片读取失败：`, error)
-      return [inlet.fid, []] as const
+      return [inlet.fid, []]
     }
   }))
   if (sequence !== insulationRenderSequence || props.activeDataModule !== 'JOINT_VERIFY' || store.selectedUnit?.id !== unitId) return
@@ -543,12 +544,12 @@ async function renderSoilResistivity() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'SOIL_RESISTIVITY')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = soilResistivityPoints(record).filter(hasSoilCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
+  const photoEntries = await Promise.all(points.map(async (point): Promise<[number, InspectionPhotoRecord[]]> => {
     try {
-      return [point.id, await listInspectionPhotos(soilPhotoOwnerKey(unitId, point.id))] as const
+      return [point.id, await listInspectionPhotos(soilPhotoOwnerKey(unitId, point.id))]
     } catch (error) {
       console.warn(`[Soil] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
+      return [point.id, []]
     }
   }))
   if (sequence !== soilRenderSequence || props.activeDataModule !== 'SOIL_RESISTIVITY' || store.selectedUnit?.id !== unitId) return
@@ -611,12 +612,12 @@ async function renderDcStrayCurrent() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'DC_STRAY_CURRENT')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = dcStrayCurrentPoints(record).filter(hasDcStrayCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
+  const photoEntries = await Promise.all(points.map(async (point): Promise<[number, InspectionPhotoRecord[]]> => {
     try {
-      return [point.id, await listInspectionPhotos(dcStrayPhotoOwnerKey(unitId, point.id))] as const
+      return [point.id, await listInspectionPhotos(dcStrayPhotoOwnerKey(unitId, point.id))]
     } catch (error) {
       console.warn(`[DC Stray] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
+      return [point.id, []]
     }
   }))
   if (sequence !== dcStrayRenderSequence || props.activeDataModule !== 'DC_STRAY_CURRENT' || store.selectedUnit?.id !== unitId) return
@@ -666,12 +667,12 @@ async function renderCoatingDamage() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'COATING_DETECT')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = coatingDamagePoints(record).filter(hasCoatingDamageCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
+  const photoEntries = await Promise.all(points.map(async (point): Promise<[number, InspectionPhotoRecord[]]> => {
     try {
-      return [point.id, await listInspectionPhotos(coatingDamagePhotoOwnerKey(unitId, point.id))] as const
+      return [point.id, await listInspectionPhotos(coatingDamagePhotoOwnerKey(unitId, point.id))]
     } catch (error) {
       console.warn(`[Coating] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
+      return [point.id, []]
     }
   }))
   if (sequence !== coatingRenderSequence || props.activeDataModule !== 'COATING_DETECT' || store.selectedUnit?.id !== unitId) return
@@ -724,12 +725,12 @@ async function renderPipeGroundPotential() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'PIPE_GROUND_POTENTIAL')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletPotentialReadings(record)
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
+  const photoEntries = await Promise.all(inlets.map(async (inlet): Promise<[number, InspectionPhotoRecord[]]> => {
     try {
-      return [inlet.fid, await listInspectionPhotos(pipePotentialPhotoOwnerKey(unitId, inlet.fid))] as const
+      return [inlet.fid, await listInspectionPhotos(pipePotentialPhotoOwnerKey(unitId, inlet.fid))]
     } catch (error) {
       console.warn(`[Potential] ${inlet.ecode} 照片读取失败：`, error)
-      return [inlet.fid, []] as const
+      return [inlet.fid, []]
     }
   }))
   if (sequence !== potentialRenderSequence || props.activeDataModule !== 'PIPE_GROUND_POTENTIAL' || store.selectedUnit?.id !== unitId) return
@@ -783,12 +784,12 @@ async function renderElectricContinuity() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'ELECTRIC_CONTINUITY')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = electricContinuityPoints(record).filter(hasElectricContinuityCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
+  const photoEntries = await Promise.all(points.map(async (point): Promise<[number, InspectionPhotoRecord[]]> => {
     try {
-      return [point.id, await listInspectionPhotos(electricContinuityPhotoOwnerKey(unitId, point.id))] as const
+      return [point.id, await listInspectionPhotos(electricContinuityPhotoOwnerKey(unitId, point.id))]
     } catch (error) {
       console.warn(`[Continuity] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
+      return [point.id, []]
     }
   }))
   if (sequence !== continuityRenderSequence || props.activeDataModule !== 'ELECTRIC_CONTINUITY' || store.selectedUnit?.id !== unitId) return
@@ -843,9 +844,9 @@ async function renderInletParameters() {
   const inlets = (store.facilities?.inlets ?? []).filter((inlet) => inlet.unit_id === unitId).sort((a, b) => a.lng - b.lng || a.lat - b.lat)
   const record = [...store.records].filter((item) => item.unit_id === unitId && item.item_code === 'INLET_PARAM').sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletParameterReadings(record)
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
-    try { return [inlet.fid, await listInspectionPhotos(inletParameterPhotoOwnerKey(unitId, inlet.fid))] as const }
-    catch (error) { console.warn(`[InletParameter] ${inlet.ecode} 照片读取失败：`, error); return [inlet.fid, []] as const }
+  const photoEntries = await Promise.all(inlets.map(async (inlet): Promise<[number, InspectionPhotoRecord[]]> => {
+    try { return [inlet.fid, await listInspectionPhotos(inletParameterPhotoOwnerKey(unitId, inlet.fid))] }
+    catch (error) { console.warn(`[InletParameter] ${inlet.ecode} 照片读取失败：`, error); return [inlet.fid, []] }
   }))
   if (sequence !== inletParameterRenderSequence || props.activeDataModule !== 'INLET_PARAM' || store.selectedUnit?.id !== unitId) return
   const photosByInlet = new Map(photoEntries)
@@ -1194,7 +1195,97 @@ function invalidate() {
   map?.resize?.()
 }
 
-defineExpose({ zoomToCommunityView, invalidate, fitActiveDataModule })
+/**
+ * 反查聚焦：在地图上标出一个匹配设施，放大到楼栋级，开 InfoWindow
+ *  - 由 MapPage 在 route.query.focus 有值时调用
+ *  - 不动 store，只在地图对象上叠加 marker
+ *  - 已存在的 marker/InfoWindow 会先清掉
+ */
+let focusMarker: any = null
+let focusInfoWindow: any = null
+
+function focusOnFacility(facility: {
+  name: string
+  type: string
+  community: string
+  ecode: string
+  lng: number
+  lat: number
+}, options?: { zoom?: number; label?: string }) {
+  console.log('[MapView] focusOnFacility called', facility, options)
+  if (!map || !AMapApi) {
+    console.warn('[MapView] focusOnFacility: map or AMapApi not ready')
+    return
+  }
+  const lng = facility.lng
+  const lat = facility.lat
+  if (typeof lng !== 'number' || typeof lat !== 'number' || !isFinite(lng) || !isFinite(lat)) {
+    console.warn('[MapView] focusOnFacility: invalid coordinates', facility)
+    return
+  }
+  // 清理上一次的反查标记
+  if (focusMarker) {
+    try { map.remove(focusMarker) } catch {}
+    focusMarker = null
+  }
+  if (focusInfoWindow) {
+    try { focusInfoWindow.close() } catch {}
+    focusInfoWindow = null
+  }
+  const zoom = options?.zoom ?? 18
+  const color = '#f56c6c'
+  const label = options?.label || '★'
+  focusMarker = new AMapApi.Marker({
+    position: [lng, lat],
+    map,
+    title: `${facility.name || facility.ecode} · ${facility.type || '设施'}`,
+    content:
+      `<div style="position:relative;">` +
+        `<div style="background:${color};width:24px;height:24px;border-radius:50%;` +
+          `border:3px solid #fff;box-shadow:0 0 14px ${color},0 0 4px rgba(0,0,0,0.4);` +
+          `animation: focus-pulse 1.4s ease-out infinite;"></div>` +
+        `<div style="position:absolute;top:-24px;left:50%;transform:translateX(-50%);` +
+          `background:${color};color:#fff;font-size:12px;font-weight:700;` +
+          `padding:2px 6px;border-radius:9px;white-space:nowrap;` +
+          `box-shadow:0 1px 4px rgba(0,0,0,0.4);">${label}</div>` +
+      `</div>`,
+    zIndex: 500,
+  })
+  console.log('[MapView] focusOnFacility: marker placed at', [lng, lat], 'zoom', zoom)
+  // 飞过去 + 强制 zoom
+  map.setZoomAndCenter(zoom, [lng, lat], false, 700)
+  // InfoWindow
+  const html =
+    `<div style="padding:8px 6px;min-width:220px;font-family:-apple-system,sans-serif;">` +
+      `<div style="font-weight:700;font-size:15px;color:#303133;margin-bottom:6px;">` +
+        `${facility.name || facility.ecode || '未命名'}` +
+      `</div>` +
+      `<div style="color:#606266;font-size:12px;line-height:1.7;">` +
+        `<div>类型：${facility.type || '设施'}</div>` +
+        `<div>小区：${facility.community}</div>` +
+        `${facility.ecode ? `<div>编号：${facility.ecode}</div>` : ''}` +
+        `<div>坐标：${lng.toFixed(6)}, ${lat.toFixed(6)}</div>` +
+      `</div>` +
+    `</div>`
+  focusInfoWindow = new AMapApi.InfoWindow({
+    content: html,
+    offset: new AMapApi.Pixel(0, -32),
+    closeWhenClickMap: true,
+  })
+  // 等动画结束再开窗，避免位置错
+  setTimeout(() => {
+    try { focusInfoWindow?.open(map, [lng, lat]) } catch {}
+  }, 750)
+}
+
+function clearFocus() {
+  if (focusMarker && map) { try { map.remove(focusMarker) } catch {} }
+  if (focusInfoWindow) { try { focusInfoWindow.close() } catch {} }
+  focusMarker = null
+  focusInfoWindow = null
+}
+
+defineExpose({ zoomToCommunityView, invalidate, fitActiveDataModule, focusOnFacility, clearFocus })
 
 onMounted(async () => {
   if (!mapRef.value) return
@@ -1227,6 +1318,8 @@ onMounted(async () => {
     window.addEventListener('inletparameterdatachange', handleInletParameterDataChange)
     isCommunityView = map.getZoom() < COMMUNITY_VIEW_ZOOM
     renderAll()
+    // 通知父组件 AMap 已就绪，MapPage 收到后可以调 focusOnFacility
+    emit('ready')
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '高德地图加载失败'
     ElMessage.error(loadError.value)
@@ -1364,6 +1457,11 @@ onBeforeUnmount(() => {
 .amap-main-map {
   width: 100%;
   height: 100%;
+}
+@keyframes focus-pulse {
+  0%   { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.7); }
+  50%  { transform: scale(1.1); box-shadow: 0 0 0 12px rgba(245, 108, 108, 0); }
+  100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(245, 108, 108, 0); }
 }
 .amap-main-wrapper {
   position: relative;
