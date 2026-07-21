@@ -59,13 +59,27 @@ async function loadXLSX() {
 /**
  * 优先读取原始资源；仓库中二进制物探文件使用 Base64 文本保存，
  * 避免不同工具写入 xlsx 时损坏。运行时按需还原为 ArrayBuffer。
+ *
+ * 关键：当 .xlsx/.csv 不存在时，Vite SPA 会返回 200 + HTML（index.html），
+ * 解析会失败。所以必须先验证 Content-Type / 魔术字节，再 fallback 到 .base64。
  */
 async function fetchAssetBuffer(path: string): Promise<ArrayBuffer> {
-  const response = await fetch(path)
-  if (response.ok) return response.arrayBuffer()
+  // 1) 尝试原始文件（仅在 Content-Type 正确且不是 HTML 时才采用）
+  try {
+    const response = await fetch(path)
+    if (response.ok) {
+      const ct = response.headers.get('content-type') || ''
+      // 必须是 application/octet-stream / application/vnd.ms-excel / application/vnd.openxmlformats / text/csv / text/plain
+      // 不能是 text/html（SPA fallback）
+      if (!ct.includes('text/html') && !ct.includes('application/json')) {
+        return response.arrayBuffer()
+      }
+    }
+  } catch {}
 
+  // 2) 退回到 .base64（仓库里以文本形式存的二进制）
   const encodedResponse = await fetch(`${path}.base64`)
-  if (!encodedResponse.ok) throw new Error(`HTTP ${response.status} / Base64 HTTP ${encodedResponse.status}`)
+  if (!encodedResponse.ok) throw new Error(`无法加载 ${path}（原始 + .base64 都 404）`)
   const encoded = (await encodedResponse.text()).replace(/\s+/g, '')
   const binary = atob(encoded)
   const bytes = new Uint8Array(binary.length)

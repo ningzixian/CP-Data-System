@@ -188,13 +188,23 @@ async function ask(q?: string) {
         result.value = r
         const key = r.mapMatchedKey
         const label = r.mapMatchedLabel || key
-        history.value.unshift({
-          q: `${text}（已跳转地图：${label}）`,
-          r,
-          at: Date.now(),
-        })
-        if (history.value.length > 20) history.value.pop()
-        router.push({ path: '/map', query: { focus: key } })
+        // 防御：破损点 ID（DP-xxx）MapPage 无法反查解析，强制留在智问页
+        //  - 万一 LLM 兜底把破损点 ID 塞进 plan.answer/filter，再被 mapMatchedKey 误传，会触发"无法访问 key"错误
+        const isDamagePointKey = /^DP[-_]/i.test(key) || /破损|涂层|防腐层/i.test(key)
+        if (r.isLocationOnly || isDamagePointKey) {
+          // 留在智问页，只显示地图标记，不跳转
+          //  - 走"思考 → I Know → 出结果"动画，让用户知道正在定位
+          const safeR = { ...r, mapMatchedKey: undefined }
+          scheduleReveal(safeR, text)
+        } else {
+          history.value.unshift({
+            q: `${text}（已跳转地图：${label}）`,
+            r,
+            at: Date.now(),
+          })
+          if (history.value.length > 20) history.value.pop()
+          router.push({ path: '/map', query: { focus: key } })
+        }
       } else {
         // 走"思考 → I Know → 出结果"动画
         scheduleReveal(r, text)
@@ -208,13 +218,11 @@ async function ask(q?: string) {
       lastMethod.value = 'llm'
       if (r) scheduleReveal(r, text)
     } else {
-      // 规则不行 / LLM 没开 / score=0（输入完全不相关）— 给出引导，但地图仍然给个默认反馈
+      // 规则不行 / LLM 没开 / score=0（输入完全不相关）— 给出引导，地图不输出数据（仅显示空白底图，避免误导）
       const fallbackResult: QueryResult = enrichMap({
         text: `未找到与「${text}」匹配的信息。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n1. 加上明确的关键词（小区、管线、调压箱、检测项）\n2. 加上聚合词（多少、总长、平均、分布、异常）\n3. 在右上角 ⚙ 开启 LLM 兜底，让本地大模型帮你解析`,
         sql: `未匹配到：${conf.reasons.join('、') || '无任何维度（输入完全不相关）'}`,
-        mapDataset: 'pipes',
-        mapFocus: 'all',
       }, text, data.value)
       lastMethod.value = 'rule'
       history.value.unshift({ q: text, r: fallbackResult, at: Date.now(), via: 'rule' })
@@ -962,6 +970,36 @@ function renderMap(r: QueryResult) {
     // 单点（编号反查单点匹配）— 直接 setZoomAndCenter，强制收紧视野
     if (allPoints.length === 1) {
       map.setZoomAndCenter(zoom, center, false, 600)
+
+      // 纯位置查询：在主标记周围画一个红色框/圈，醒目圈出
+      if (r.isLocationOnly) {
+        try {
+          new AMap.Circle({
+            center: [center[0], center[1]],
+            radius: 18,  // 18 米（楼栋级），与 zoom 18 配合刚好框住单点
+            strokeColor: '#f56c6c',
+            strokeWeight: 3,
+            strokeOpacity: 1,
+            fillColor: '#f56c6c',
+            fillOpacity: 0.12,
+            map,
+            zIndex: 150,
+          })
+          // 圈外再画一圈淡色"涟漪"，强化位置感
+          new AMap.Circle({
+            center: [center[0], center[1]],
+            radius: 35,
+            strokeColor: '#f56c6c',
+            strokeWeight: 1.5,
+            strokeOpacity: 0.45,
+            strokeStyle: 'dashed',
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            map,
+            zIndex: 140,
+          })
+        } catch {}
+      }
       return
     }
 
@@ -1294,7 +1332,8 @@ function renderText(text: string) {
           </template>
         </div>
 
-        <div v-else>
+        <!-- 纯位置查询：不在中间显示文本/表格/图表，只在右侧地图标记+框选 -->
+        <div v-else-if="!result.isLocationOnly">
           <div class="zw-answer" :class="`answer-${lastMethod}`">
             <el-icon :size="18" :color="lastMethod === 'llm' ? '#e6a23c' : '#67C23A'">
               <MagicStick v-if="lastMethod === 'llm'" />
@@ -1357,12 +1396,24 @@ function renderText(text: string) {
             <div ref="chartRef" class="zw-chart" />
           </div>
         </div>
+
+        <!-- 纯位置查询：给一个轻量提示，引导用户看右侧地图 -->
+        <div v-else class="zw-location-hint">
+          <el-icon :size="22" color="#409EFF"><Aim /></el-icon>
+          <div class="zw-location-hint-body">
+            <div class="zw-location-hint-title">📍 {{ result.mapMatchedLabel || result.mapMatchedKey }}</div>
+            <div class="zw-location-hint-sub">已在右侧地图标出位置，红色方框圈出匹配设施</div>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧：地图 + 报告摘要 -->
       <div class="zw-right">
-        <!-- 地理视图小地图：反查命中时不显示（用户期望直接跳到地图页全屏查看） -->
-        <div v-if="!result?.mapMatchedKey" class="zw-card">
+        <!-- 地理视图小地图：
+              - 反查命中 + 纯位置查询（isLocationOnly）→ 显示（用户期望看地图标记）
+              - 反查命中 + 普通查询 → 隐藏（用户期望直接跳到地图页全屏查看）
+              - 普通结果 → 显示 -->
+        <div v-if="!result?.mapMatchedKey || result?.isLocationOnly" class="zw-card">
           <div class="zw-card-title">
             <el-icon><MapLocation /></el-icon> 地理视图
             <span v-if="mapBadge" class="map-title-extra">{{ mapBadge }}</span>

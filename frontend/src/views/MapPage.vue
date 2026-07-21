@@ -182,7 +182,12 @@ async function performFocus(key: string) {
   }
   const lookup = extractLookupKey(key)
   if (!lookup) {
-    showFocusBanner(`反查失败：无法解析 key "${key}"`, 'error', 5000)
+    // 友好提示：破损点 ID（DP-xxx）无法在 MapPage 反查，应在智问页查
+    if (/^DP[-_]/i.test(key) || /破损|涂层|防腐层/i.test(key)) {
+      showFocusBanner(`破损点反查请在「智问」页查询（如「三里的破损点」）`, 'warning', 6000)
+    } else {
+      showFocusBanner(`反查失败：无法解析 key "${key}"`, 'error', 5000)
+    }
     return
   }
   const matches = searchFacilityByKey(lookup.key, lookup.type, focusZhiwenData.value)
