@@ -136,6 +136,8 @@ export interface QueryResult {
   mapMatchedLabel?: string
   /** 反查匹配 key（用于地图 InfoWindow 标题） */
   mapMatchedKey?: string
+  /** 纯位置查询留在智问页，通过右侧地图直接标记位置。 */
+  isLocationOnly?: boolean
   /** 报告（当 isReport=true 时，由 ZhiwenPage 渲染 ReportPreview） */
   isReport?: boolean
   report?: any  // Report 类型（避免循环依赖）
@@ -267,7 +269,13 @@ function isSumIntent(text: string) {
 }
 
 function isAvgIntent(text: string) {
-  return /平均|均值|avg|mean/i.test(text)
+  if (!/平均|均值|avg|mean/i.test(text)) return false
+  // 管线号、编号、代号等是字符串标识，不能作为数值参与平均值计算。
+  const identifier = '(?:管线号|管线编号|编号|代号|设备号|设施号|ID|id)'
+  const average = '(?:平均|均值|avg|mean)'
+  if (new RegExp(`${identifier}.{0,4}${average}`, 'i').test(text)) return false
+  if (new RegExp(`${average}.{0,4}${identifier}`, 'i').test(text)) return false
+  return true
 }
 
 function isMaxMinIntent(text: string): 'max' | 'min' | null {
@@ -582,6 +590,14 @@ export function isUnitLookupQuery(text: string) {
   // 单元引用：X单元 / X号楼X单元 / X号X单元
   if (/\d+\s*单元/.test(text)) return true
   return false
+}
+
+/** 用户只询问某个可识别设施的位置，不附带统计或详情意图。 */
+export function isLocationOnlyQuery(text: string): boolean {
+  const value = text.trim()
+  if (!/(在哪|在哪儿|在哪里|位置)(\?|？|。|；|;|,|，|$)/.test(value)) return false
+  if (/什么|哪些|几个|多少|总长|总长度|平均|分布|怎么|如何|为什么/.test(value)) return false
+  return isUnitLookupQuery(value)
 }
 
 /** 中文数字 → 阿拉伯数字 */
@@ -1077,24 +1093,42 @@ export function matchProgressRange(text: string): { op: '>=' | '<=' | '>'; value
   if (m) return { op: '>=', value: parseInt(m[1]) / 100 }
   m = text.match(/(\d+)\s*%\s*(以下|以下|以内)/)
   if (m) return { op: '<=', value: parseInt(m[1]) / 100 }
+  if (/(已经|已|全部)\s*100\s*%\s*(完成|完工|已完)/.test(text)) return { op: '>=', value: 1 }
+  if (/进度\s*(达到|到|完成|是)\s*100\s*%?/.test(text)) return { op: '>=', value: 1 }
   return null
 }
 
-/** 检测员匹配："检测员张三" / "张三检测的" / "张三今天检测了多少" / "李四的检测" */
+/** 常见中文姓氏，用于避免把“完成”“知道”等普通词误识别为检测员姓名。 */
+const COMMON_SURNAMES = new Set([
+  '王', '李', '张', '刘', '陈', '杨', '黄', '赵', '吴', '周',
+  '徐', '孙', '马', '朱', '胡', '郭', '何', '高', '林', '罗',
+  '郑', '梁', '谢', '宋', '唐', '许', '韩', '冯', '邓', '曹',
+  '彭', '曾', '萧', '田', '董', '袁', '潘', '于', '蒋', '蔡',
+  '余', '杜', '叶', '程', '苏', '魏', '吕', '丁', '任', '沈',
+  '姚', '卢', '姜', '崔', '钟', '谭', '陆', '汪', '范', '金',
+  '石', '廖', '贾', '夏', '韦', '付', '方', '白', '邹', '孟',
+  '熊', '秦', '邱', '侯', '江', '尹', '薛', '闫', '段', '雷',
+])
+
+function looksLikeChineseName(value: string): boolean {
+  return value.length >= 2 && value.length <= 3 && COMMON_SURNAMES.has(value[0])
+}
+
+/** 检测员匹配：“检测员张三” / “张三检测的” / “张三今天检测了多少” / “李四的检测” */
 export function matchInspector(text: string): string | null {
   // 名字后的合法边界：必须紧跟检测/录入/巡检/施工/做 等明确动作词，或"的检测/的录入"等所有格形式
   //  - 不能是任意 2-3 字+任意边界（如"道点啥"、"知道点"），否则会把闲聊当检测员
   //  - 保留"最"以支持"张三最常检测什么"这类查询
   const NAME_BOUNDARY = '(?:做的?|检测的?|录入的?|巡检的?|施工的?|的检测|的录入|的巡检|的施工|的所有记录|的全部记录|的记录|最|$)'
 
-  // 1) "检测员XXX" — 名字 2-3 字 + 动作边界
+  // 1) “检测员XXX” — 名字 2-3 字 + 动作边界
   let m = text.match(new RegExp(`检测员\\s*[::]?\\s*([\\u4e00-\\u9fa5]{2,3}?)(?=${NAME_BOUNDARY})`))
-  if (m) return m[1].trim()
+  if (m && looksLikeChineseName(m[1].trim())) return m[1].trim()
 
   // 2) "张三做的" / "张三检测的" / "张三的检测" / "李四的录入" / "张三最常检测什么"
   //    关键：名字后必须紧跟"做/检测/录入/巡检/施工/的X"等明确指示，不能是任意 2-3 字+任意边界
   m = text.match(new RegExp(`([\\u4e00-\\u9fa5]{2,3}?)(?=${NAME_BOUNDARY})`))
-  if (m) return m[1].trim()
+  if (m && looksLikeChineseName(m[1].trim())) return m[1].trim()
 
   return null
 }
@@ -1389,6 +1423,22 @@ export function scoreConfidence(text: string): { score: number; reasons: string[
       || /比(谁|哪个).{0,8}(多|少|长|短|大|小|高|低|好|差|强|弱)/i.test(text)) {
     score += 0.2; reasons.push('对比意图')
   }
+  if (/检测员.{0,4}(工作量|排名|统计|对比)|各检测员|工作量排名/.test(text)) {
+    score += 0.3; reasons.push('检测员排名')
+  }
+  if (/\d{4}\s*年\s*(以前|之前|建成)/.test(text) || /建设年代/.test(text)) {
+    score += 0.3; reasons.push('年份范围')
+  }
+  if (/进度|完成率|完成度|未完成|进度异常/.test(text)) {
+    score += 0.3; reasons.push('进度意图')
+  }
+  if (/(已经|已|全部)?\s*100\s*%\s*(完成|完工)|(已经|已|全部)?\s*完成\s*(的|了)/.test(text)
+      || /未完成|未完工|未启动|未开始/.test(text)) {
+    score += 0.3; reasons.push('进度100%')
+  }
+  if (/物探|拓扑|TQ_LINE|TQ_POINT|拓扑数据|物探数据|物探线|物探点/.test(text)) {
+    score += 0.4; reasons.push('物探数据')
+  }
   // 编号反查意图：FSKZ 编号 / ECODE / 楼栋引用 + "在哪里/属于/查" 等
   //  - 纯编号（"FSKZ755853"、"N54R328A067"）如果不加这个分，会被 dataset/小区维度都拿不到 → 走 LLM 兜底
   //  - 加 0.4 保底让 rules 路径至少能跑到 lookup 分支
@@ -1401,7 +1451,7 @@ export function scoreConfidence(text: string): { score: number; reasons: string[
   if (matchProgressRange(text)) { score += 0.2; reasons.push('进度范围') }
   if (matchInspector(text)) { score += 0.2; reasons.push('检测员') }
   if (isTwoUnitCompare(text)) { score += 0.3; reasons.push('两单元对比') }
-  if (isDamagePointQuery(text)) { score += 0.3; reasons.push('破损点') }
+  if (isDamagePointQuery(text)) { score += 0.4; reasons.push('破损点') }
   return { score: Math.min(score, 1), reasons }
 }
 
@@ -1811,6 +1861,9 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         mapMatchedLabel: mainPoints.length === 1
           ? `破损点 · ${mainPoints[0].name}`
           : `${mainPoints.length} 个破损点${filter.building ? '（' + filter.building + '）' : ''}`,
+        // 仅明确询问位置时留在智问页；数量、列表等查询仍展示完整回答。
+        // main 同时保留 DP key 的主地图反查兼容能力。
+        isLocationOnly: !isCount && /(位置|在哪|在哪里|在哪儿)/.test(q),
         sql: `破损点反查 | filter=${JSON.stringify(filter)} | 命中 ${points.length} 处, 跨 ${byCommunity.size} 个小区`,
       }
     } else {
@@ -1819,8 +1872,6 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         text: `未找到符合条件的破损点。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n- **三里的破损点**（按小区）\n- **FSKZ755856 的破损点**（按控制单元）\n- **1号楼的破损点**（按楼号）\n- **严重破损**（按严重程度）\n- **破损点有几个**（总数）`,
         sql: `破损点反查 | filter=${JSON.stringify(filter)} | 未命中`,
-        mapDataset: 'pipes',
-        mapFocus: 'all',
       }
     }
   }
@@ -2077,6 +2128,7 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
           mapMatchedLabel: matches.length === 1
             ? `${matches[0].type} · ${matches[0].name || matches[0].ecode}`
             : `${matches.length} 个匹配 · ${lookup.key}`,
+          isLocationOnly: isLocationOnlyQuery(q),
           mapOverlay: matches.map((m, idx) => ({
             lng: m.lng,
             lat: m.lat,
@@ -2090,12 +2142,74 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         }
       } else {
         // 没找到 - 给出引导
+        // 数据源缺少楼号字段时，退回到目标小区的设施清单，避免楼栋位置查询直接返回空白。
+        if (lookup.type === 'building' || lookup.type === 'unit') {
+          const targetCommunity = matchCommunity(q)
+          const allFacilities: ReturnType<typeof searchFacilityByKey> = []
+          const facilitySources = [
+            { dataset: 'inlets' as const, rows: data.inlets, label: '引入口' },
+            { dataset: 'joints' as const, rows: data.joints, label: '绝缘接头' },
+            { dataset: 'regulators' as const, rows: data.regulators, label: '调压箱' },
+          ]
+          facilitySources.forEach((source) => {
+            source.rows.forEach((facility) => {
+              if (targetCommunity && facility.community !== targetCommunity) return
+              if (!Number.isFinite(Number(facility.lng)) || !Number.isFinite(Number(facility.lat))) return
+              allFacilities.push({
+                dataset: source.dataset,
+                type: source.label,
+                name: facility.name || facility.ecode || '',
+                ecode: facility.ecode || '',
+                community: facility.community,
+                location_desc: '',
+                lng: Number(facility.lng),
+                lat: Number(facility.lat),
+                pipeno: facility.pipeno || '',
+                raw: facility,
+              })
+            })
+          })
+          const visibleFacilities = allFacilities.slice(0, 50)
+          if (visibleFacilities.length) {
+            const breakdown = facilitySources.map((source) => {
+              const count = visibleFacilities.filter((item) => item.dataset === source.dataset).length
+              return count ? `${source.label}${count}个` : ''
+            }).filter(Boolean).join('、')
+            return {
+              text: `“${lookup.key}”在现有数据中没有楼号字段，暂时无法精确匹配。\n\n已展示${targetCommunity || '全部小区'}的相关设施作为参考（${visibleFacilities.length} 个，${breakdown}）。\n\n可使用 FSKZ 控制单元编号或 ECODE 设施编号进一步精确查询。`,
+              totalCount: allFacilities.length,
+              table: {
+                headers: ['名称', '类型', '小区', '编号', '管线', '经度', '纬度'],
+                rows: visibleFacilities.map((item) => ({
+                  名称: item.name || item.ecode,
+                  类型: item.type,
+                  小区: item.community,
+                  编号: item.ecode,
+                  管线: item.pipeno || '—',
+                  经度: item.lng.toFixed(6),
+                  纬度: item.lat.toFixed(6),
+                })),
+              },
+              mapDataset: 'inlets',
+              mapCommunity: targetCommunity || undefined,
+              mapFocus: 'all',
+              mapOverlay: visibleFacilities.map((item, index) => ({
+                lng: item.lng,
+                lat: item.lat,
+                type: item.type,
+                name: item.name || item.ecode,
+                community: item.community,
+                status: 'matched',
+                isPrimary: index === 0,
+              })),
+              sql: `编号反查 fallback | key="${lookup.key}" type=${lookup.type} | 无楼号字段，列出 ${visibleFacilities.length} 个设施`,
+            }
+          }
+        }
         return {
           text: `未找到 "${lookup.key}" 对应的设施。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 支持的查询格式：\n- 控制单元：**FSKZ755853**\n- 设施编号：**N54R328A067** / **N79R501**\n- 楼栋引用：**1号楼** / **2号楼四单元**\n- 直接问："N54R328A067 在哪个小区？" / "1号楼有什么设施？"`,
           sql: `编号反查 | key="${lookup.key}" type=${lookup.type} | 未命中`,
-          mapDataset: 'pipes',
-          mapFocus: 'all',
         }
       }
     }
@@ -2329,8 +2443,6 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         text: `未找到符合条件的${datasetLabel}。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n- 加上明确的小区（七里 / 三里 / 六里 / 全部）\n- 换一种对象（管线 / 调压箱 / 引入口 / 控制单元 / 检测项）\n- 减少过滤条件（去掉压力、管径、材质等）`,
         totalCount: 0,
-        mapDataset: (['pipes','inlets','controls','joints','regulators'] as readonly string[]).includes(dataset) ? (dataset as 'pipes' | 'inlets' | 'controls' | 'joints' | 'regulators') : undefined,
-        mapCommunity: matchCommunity(q) || undefined,
         sql,
       }
     }
@@ -2392,8 +2504,6 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         text: `${datasetLabel}${filterDesc}没有可统计的管线。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n- 加上明确的小区（七里 / 三里 / 六里 / 全部）\n- 减少过滤条件（去掉压力、管径、材质等）`,
         totalCount: 0,
-        mapDataset: 'pipes',
-        mapCommunity: matchCommunity(q) || undefined,
         sql,
       }
     }
@@ -2593,8 +2703,6 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
         text: `未找到符合条件的${datasetLabel}。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n- 加上明确的小区（七里 / 三里 / 六里 / 全部）\n- 换一种对象（管线 / 调压箱 / 引入口 / 控制单元 / 检测项）\n- 减少过滤条件（去掉压力、管径、材质等）`,
         totalCount: 0,
-        mapDataset: (['pipes','inlets','controls','joints','regulators'] as readonly string[]).includes(dataset) ? (dataset as 'pipes' | 'inlets' | 'controls' | 'joints' | 'regulators') : undefined,
-        mapCommunity: matchCommunity(q) || undefined,
         sql,
       }
     }
@@ -2709,12 +2817,6 @@ export const PRESET_QUERIES: Array<{ label: string; query: string; tag: string }
   { tag: '进度', label: '📊 已经100%完成的单元', query: '已经100%完成的单元' },
   { tag: '时间', label: '⏰ 三里这周新增的异常', query: '三里这周新增的异常' },
   { tag: '时间', label: '⏰ 上个月新增的检测', query: '上个月新增的检测' },
-  { tag: '检测员', label: '👤 检测员张三的所有记录', query: '检测员张三的所有记录' },
-  { tag: '检测员', label: '👤 张三检测了多少个', query: '张三检测了多少个' },
-  { tag: '检测员', label: '👤 张三今天检测了多少', query: '张三今天检测了多少' },
-  { tag: '检测员', label: '👤 张三最常检测什么', query: '张三最常检测什么' },
-  { tag: '检测员', label: '👤 检测员工作量排名', query: '检测员工作量' },
-  { tag: '检测员', label: '👤 李四的检测', query: '李四的检测' },
   { tag: '管网', label: '📊 各小区管线总长对比', query: '各小区管线总长度' },
   { tag: '管网', label: '🥧 各压力等级管线分布', query: '管线压力分布' },
   { tag: '管网', label: '🥧 各材质管线分布', query: '管线材质分布' },

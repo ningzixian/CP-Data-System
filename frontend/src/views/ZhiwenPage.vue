@@ -195,17 +195,17 @@ async function ask(q?: string) {
       // 走规则
       const r = enrichMap(runQuery(text, data.value), text, data.value)
       lastMethod.value = 'rule'
-      // 反查命中：直接跳地图（不延迟）
+      // 普通反查跳转主地图；纯位置查询留在智问页使用右侧地图展示。
       if (r.mapMatchedKey) {
-        result.value = r
         const key = r.mapMatchedKey
-        history.value.unshift({
-          q: text,
-          r,
-          at: Date.now(),
-          via: 'rule',
-        })
-        router.push({ path: '/map', query: { focus: key } })
+        if (r.isLocationOnly) {
+          history.value.unshift({ q: text, r, at: Date.now(), via: 'rule' })
+          scheduleReveal(r, text)
+        } else {
+          result.value = r
+          history.value.unshift({ q: text, r, at: Date.now(), via: 'rule' })
+          router.push({ path: '/map', query: { focus: key } })
+        }
       } else {
         // 走"思考 → I Know → 出结果"动画
         history.value.unshift({ q: text, r, at: Date.now(), via: 'rule' })
@@ -223,13 +223,11 @@ async function ask(q?: string) {
         scheduleReveal(r, text)
       }
     } else {
-      // 规则不行 / LLM 没开 / score=0（输入完全不相关）— 给出引导，但地图仍然给个默认反馈
+      // 规则不行 / LLM 没开 / score=0（输入完全不相关）— 给出引导，不绘制误导性的默认地图数据。
       const fallbackResult: QueryResult = enrichMap({
         text: `未找到与「${text}」匹配的信息。\n\n请输入更多的信息，以便更精准地查询；\n请连接网络，以便检索更多消息；
 在数据库中补充更多有效数据。\n\n💡 试试：\n1. 加上明确的关键词（小区、管线、调压箱、检测项）\n2. 加上聚合词（多少、总长、平均、分布、异常）\n3. 在右上角 ⚙ 开启 LLM 兜底，让本地大模型帮你解析`,
         sql: `未匹配到：${conf.reasons.join('、') || '无任何维度（输入完全不相关）'}`,
-        mapDataset: 'pipes',
-        mapFocus: 'all',
       }, text, data.value)
       lastMethod.value = 'rule'
       history.value.unshift({ q: text, r: fallbackResult, at: Date.now(), via: 'rule' })
@@ -572,6 +570,12 @@ function enrichMap(r: QueryResult, query: string, d: ZhiwenData): QueryResult {
     '南海家园七里': '#409EFF',
     '南海家园三里': '#67C23A',
     '南海家园六里': '#E6A23C',
+  }
+
+  // 空结果只保留底图，不再自动补成“全管网”，避免给用户造成命中数据的错觉。
+  if (!r.mapDataset && !r.mapOverlay?.length
+      && (r.totalCount === 0 || r.text.startsWith('未找到') || r.sql.startsWith('未匹配到'))) {
+    return r
   }
 
   // 1) 空间数据集已有 mapDataset：补上聚焦模式
@@ -970,6 +974,35 @@ function renderMap(r: QueryResult) {
     // 单点（编号反查单点匹配）— 直接 setZoomAndCenter，强制收紧视野
     if (allPoints.length === 1) {
       map.setZoomAndCenter(zoom, center, false, 600)
+      if (r.isLocationOnly) {
+        try {
+          new AMap.Circle({
+            center,
+            radius: 18,
+            strokeColor: '#f56c6c',
+            strokeWeight: 3,
+            strokeOpacity: 1,
+            fillColor: '#f56c6c',
+            fillOpacity: 0.12,
+            zIndex: 150,
+            map,
+          })
+          new AMap.Circle({
+            center,
+            radius: 35,
+            strokeColor: '#f56c6c',
+            strokeWeight: 1.5,
+            strokeOpacity: 0.45,
+            strokeStyle: 'dashed',
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            zIndex: 140,
+            map,
+          })
+        } catch {
+          // 地图 SDK 缺少 Circle 能力时仍保留原有点位标记。
+        }
+      }
       return
     }
 
@@ -1306,7 +1339,7 @@ function renderText(text: string) {
           </template>
         </div>
 
-        <div v-else>
+        <div v-else-if="!result.isLocationOnly">
           <div class="zw-answer" :class="`answer-${lastMethod}`">
             <el-icon :size="18" :color="lastMethod === 'llm' ? '#e6a23c' : '#67C23A'">
               <MagicStick v-if="lastMethod === 'llm'" />
@@ -1369,12 +1402,20 @@ function renderText(text: string) {
             <div ref="chartRef" class="zw-chart" />
           </div>
         </div>
+
+        <div v-else class="zw-location-hint">
+          <el-icon :size="22" color="#409EFF"><Aim /></el-icon>
+          <div class="zw-location-hint-body">
+            <div class="zw-location-hint-title">📍 {{ result.mapMatchedLabel || result.mapMatchedKey }}</div>
+            <div class="zw-location-hint-sub">已在右侧地图标出位置，红色圆圈表示匹配设施</div>
+          </div>
+        </div>
       </div>
 
       <!-- 右侧：地图 + 报告摘要 -->
       <div class="zw-right">
         <!-- 地理视图小地图：反查命中时不显示（用户期望直接跳到地图页全屏查看） -->
-        <div v-if="!result?.mapMatchedKey" class="zw-card">
+        <div v-if="!result?.mapMatchedKey || result?.isLocationOnly" class="zw-card">
           <div class="zw-card-title">
             <el-icon><MapLocation /></el-icon> 地理视图
             <span v-if="mapBadge" class="map-title-extra">{{ mapBadge }}</span>
@@ -1886,6 +1927,44 @@ function renderText(text: string) {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.zw-location-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #b3d8ff;
+  border-radius: 8px;
+  background: #f0f9ff;
+  color: #303133;
+}
+
+.zw-location-hint-body {
+  min-width: 0;
+}
+
+.zw-location-hint-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.zw-location-hint-sub {
+  margin-top: 2px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+:global(html.dark) .zw-location-hint {
+  border-color: rgba(64, 158, 255, 0.42);
+  background: rgba(64, 158, 255, 0.1);
+  color: #e5eaf3;
+}
+
+:global(html.dark) .zw-location-hint-sub {
+  color: #a3adc2;
 }
 
 .answer-llm {

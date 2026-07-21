@@ -61,11 +61,21 @@ async function loadXLSX() {
  * 避免不同工具写入 xlsx 时损坏。运行时按需还原为 ArrayBuffer。
  */
 async function fetchAssetBuffer(path: string): Promise<ArrayBuffer> {
-  const response = await fetch(path)
-  if (response.ok) return response.arrayBuffer()
+  try {
+    const response = await fetch(path)
+    if (response.ok) {
+      const contentType = response.headers.get('content-type') || ''
+      // Vite 的 SPA 回退可能以 200 返回 index.html，不能把它当作 xlsx/csv 解析。
+      if (!contentType.includes('text/html') && !contentType.includes('application/json')) {
+        return response.arrayBuffer()
+      }
+    }
+  } catch {
+    // 原始资源不可用时继续尝试仓库中的 Base64 备份。
+  }
 
   const encodedResponse = await fetch(`${path}.base64`)
-  if (!encodedResponse.ok) throw new Error(`HTTP ${response.status} / Base64 HTTP ${encodedResponse.status}`)
+  if (!encodedResponse.ok) throw new Error(`无法加载 ${path}（原始资源和 Base64 资源均不可用）`)
   const encoded = (await encodedResponse.text()).replace(/\s+/g, '')
   const binary = atob(encoded)
   const bytes = new Uint8Array(binary.length)
