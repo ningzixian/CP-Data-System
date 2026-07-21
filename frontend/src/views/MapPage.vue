@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onActivated, onBeforeUnmount, onDeactivated } from 'vue'
+import { useRoute } from 'vue-router'
 import { useCpStore } from '@/stores/cp'
+import { extractLookupKey, searchFacilityByKey, type ZhiwenData } from '@/zhiwen/engine'
+import { loadZhiwenNetworkData, projectCpData } from '@/zhiwen/dataLoader'
 import MapView from '@/components/MapView.vue'
 import UnitCard from '@/components/UnitCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
@@ -24,7 +27,10 @@ import { COMMUNITY_ORDER, averageCommunityProgress, communityOfUnit } from '@/ut
 import type { CorrosionUnit, InspectionItemCode } from '@/types/models'
 
 const store = useCpStore()
+const route = useRoute()
 const mapRef = ref<InstanceType<typeof MapView> | null>(null)
+const mapReady = ref(false)
+const focusRequest = ref<string | null>(null)
 
 const drawerOpen = ref(false)
 const activeTab = ref('')
@@ -133,6 +139,123 @@ let communityZoomScrollTimer: number | null = null
 let focusedCommunityScrollTimer: number | null = null
 let dataModulesTimer: number | null = null
 const DATA_MODULE_CLOSE_MS = 960
+
+// ============== 智问反查定位（/map?focus=KEY） ==============
+const focusZhiwenData = ref<ZhiwenData | null>(null)
+const focusBanner = ref<{
+  visible: boolean
+  message: string
+  type: 'loading' | 'success' | 'warning' | 'error'
+}>({ visible: false, message: '', type: 'loading' })
+let focusBannerTimer: number | null = null
+let focusSequence = 0
+
+function hideFocusBanner() {
+  if (focusBannerTimer !== null) window.clearTimeout(focusBannerTimer)
+  focusBannerTimer = null
+  focusBanner.value = { visible: false, message: '', type: 'loading' }
+}
+
+function showFocusBanner(
+  message: string,
+  type: 'loading' | 'success' | 'warning' | 'error',
+  durationMs = 0,
+) {
+  hideFocusBanner()
+  focusBanner.value = { visible: true, message, type }
+  if (durationMs > 0) {
+    focusBannerTimer = window.setTimeout(() => {
+      focusBannerTimer = null
+      focusBanner.value = { visible: false, message: '', type: 'loading' }
+    }, durationMs)
+  }
+}
+
+async function performFocus(key: string) {
+  if (!key || !mapReady.value) return
+  const sequence = ++focusSequence
+  showFocusBanner('正在加载管网数据用于反查…', 'loading')
+  try {
+    if (!focusZhiwenData.value) {
+      const [network] = await Promise.all([loadZhiwenNetworkData(), store.loadAll()])
+      if (sequence !== focusSequence) return
+      const communityByUnit = Object.fromEntries(store.units.map((unit) => [unit.id, communityOfUnit(unit)]))
+      const cp = projectCpData(store.units as any, store.records as any, communityByUnit)
+      focusZhiwenData.value = {
+        pipes: network.pipes,
+        inlets: network.inlets,
+        controls: network.controls,
+        joints: network.joints,
+        regulators: network.regulators,
+        units: cp.units,
+        records: cp.records,
+        communities: network.communities,
+        topology: network.topology,
+      }
+    }
+
+    if (sequence !== focusSequence) return
+    const lookup = extractLookupKey(key)
+    if (!lookup) {
+      showFocusBanner(`无法识别定位编号“${key}”`, 'error', 5000)
+      return
+    }
+    const matches = searchFacilityByKey(lookup.key, lookup.type, focusZhiwenData.value)
+    if (!matches.length) {
+      showFocusBanner(`没有找到“${key}”对应的设施`, 'warning', 5000)
+      return
+    }
+
+    const main = matches[0]
+    const label = matches.length === 1
+      ? `${main.type} · ${main.name || main.ecode || key}`
+      : `${key} · 共 ${matches.length} 个匹配`
+    const focused = mapRef.value?.focusOnFacility({
+      name: main.name || '',
+      type: main.type,
+      community: main.community,
+      ecode: main.ecode,
+      lng: main.lng,
+      lat: main.lat,
+    }, { zoom: 19, label })
+    if (!focused) {
+      showFocusBanner('地图尚未完成初始化，请稍后重试', 'warning', 4000)
+      return
+    }
+    showFocusBanner(`${label} · ${main.community}`, 'success', 5000)
+  } catch (error) {
+    if (sequence !== focusSequence) return
+    showFocusBanner(`反查数据加载失败：${error instanceof Error ? error.message : '未知错误'}`, 'error', 5000)
+  }
+}
+
+async function onMapReady() {
+  mapReady.value = true
+  await nextTick()
+  const key = focusRequest.value
+  focusRequest.value = null
+  if (key) void performFocus(key)
+}
+
+watch(
+  () => route.query.focus,
+  (value) => {
+    focusSequence++
+    const key = Array.isArray(value) ? value[0] : value
+    if (!key) {
+      focusRequest.value = null
+      mapRef.value?.clearFocus()
+      hideFocusBanner()
+      return
+    }
+    if (mapReady.value) void performFocus(String(key))
+    else {
+      focusRequest.value = String(key)
+      showFocusBanner('等待地图初始化完成…', 'loading')
+    }
+  },
+  { immediate: true },
+)
 
 function clearDataModulesTimer() {
   if (dataModulesTimer !== null) {
@@ -416,6 +539,9 @@ watch(lastFocusedCommunity, (name) => {
 })
 
 function resetPageInteractionState() {
+  focusSequence++
+  mapRef.value?.clearFocus()
+  hideFocusBanner()
   clearSidebarTimers()
   resetDataModuleMode()
   drawerOpen.value = false
@@ -428,7 +554,10 @@ onActivated(() => {
 })
 
 onDeactivated(resetPageInteractionState)
-onBeforeUnmount(resetPageInteractionState)
+onBeforeUnmount(() => {
+  resetPageInteractionState()
+  mapReady.value = false
+})
 
 const selectedUnit = computed(() => store.selectedUnit)
 
@@ -573,7 +702,14 @@ const tabItems = computed(() =>
     </div>
 
     <div class="map-panel">
-      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" :active-data-module="activeDataModule" :data-module-mode="dataModeActive" @select="selectUnit" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" @clear-data-module="clearActiveDataModule" />
+      <Transition name="map-focus-banner">
+        <div v-if="focusBanner.visible" class="map-focus-banner" :class="`is-${focusBanner.type}`" role="status">
+          <span class="map-focus-banner-dot"></span>
+          <span>{{ focusBanner.message }}</span>
+          <button type="button" title="关闭" aria-label="关闭定位提示" @click="hideFocusBanner">×</button>
+        </div>
+      </Transition>
+      <MapView ref="mapRef" :units="store.units" :points="store.points" :visibility="facilityVisibility" :active-data-module="activeDataModule" :data-module-mode="dataModeActive" @select="selectUnit" @community-focus="onCommunityFocus" @view-mode="onViewModeChange" @clear-data-module="clearActiveDataModule" @ready="onMapReady" />
       <Transition name="insulation-toolbar">
         <div v-if="activeDataModule === 'JOINT_VERIFY' && selectedUnit" class="insulation-map-toolbar">
           <div class="insulation-map-toolbar-icon">Ω</div>

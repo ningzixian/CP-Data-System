@@ -5,7 +5,7 @@
  * 复用 csv.ts 的 WKT 解析，保留所有原始字段。
  */
 
-import { parseCSV, parseWKTPoint, parseWKTLine } from '@/utils/csv'
+import { parseCSV, parseWKTPoint, parseWKTLine, parseWKTPolygon } from '@/utils/csv'
 import { loadTopologyData, mergeTopology, type TopologyData } from './topologyLoader'
 import type { PipeRow, PointRow, UnitRow, RecordRow, ZhiwenData } from './engine'
 
@@ -54,7 +54,8 @@ function parsePipes(community: string, text: string): PipeRow[] {
 
 function parsePoints(community: string, text: string, type: PointRow['type']): PointRow[] {
   return parseCSV(text).map((r) => {
-    const pt = parseWKTPoint(r.WKT) || [0, 0]
+    const polygon = parseWKTPolygon(r.WKT)
+    const pt = parseWKTPoint(r.WKT) || polygonCenter(polygon[0] ?? null) || [0, 0]
     return {
       community,
       fid: parseInt(r.fid) || 0,
@@ -67,6 +68,17 @@ function parsePoints(community: string, text: string, type: PointRow['type']): P
       pipeno: r.PIPENO || '',
     }
   })
+}
+
+/** 控制单元 CSV 的 WKT 可能是面而不是点，使用外包矩形中心作为地图反查坐标。 */
+function polygonCenter(ring: [number, number][] | null): [number, number] | null {
+  if (!ring?.length) return null
+  const lngs = ring.map(([lng]) => lng)
+  const lats = ring.map(([, lat]) => lat)
+  return [
+    (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    (Math.min(...lats) + Math.max(...lats)) / 2,
+  ]
 }
 
 /** 加载全部管网原始数据（含物探拓扑数据） */

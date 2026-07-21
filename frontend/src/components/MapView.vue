@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'community-focus', name: string): void
   (e: 'view-mode', mode: 'community' | 'detail'): void
   (e: 'clear-data-module'): void
+  (e: 'ready'): void
 }>()
 
 export type FacilityKey = 'unit' | 'pipe' | 'joint' | 'regulator' | 'inlet'
@@ -49,6 +50,9 @@ let map: any = null
 let infoWindow: any = null
 let isCommunityView = false
 let selectedFacility: { kind: FacilityKey; overlay: any; element?: HTMLElement } | null = null
+let focusMarker: any = null
+let focusInfoWindow: any = null
+let focusOpenTimer: number | null = null
 
 function currentMapStyle() {
   return document.documentElement.classList.contains('dark') ? 'amap://styles/darkblue' : 'amap://styles/normal'
@@ -1480,7 +1484,70 @@ function invalidate() {
   map?.resize?.()
 }
 
-defineExpose({ zoomToCommunityView, invalidate, fitActiveDataModule })
+interface FocusFacility {
+  name: string
+  type: string
+  community: string
+  ecode: string
+  lng: number
+  lat: number
+}
+
+function clearFocus() {
+  if (focusOpenTimer !== null) window.clearTimeout(focusOpenTimer)
+  focusOpenTimer = null
+  if (focusMarker && map) {
+    try { map.remove(focusMarker) } catch {}
+  }
+  try { focusInfoWindow?.close?.() } catch {}
+  focusMarker = null
+  focusInfoWindow = null
+}
+
+/** 接收智问反查结果，在主地图上聚焦并标出对应设施。 */
+function focusOnFacility(facility: FocusFacility, options?: { zoom?: number; label?: string }) {
+  if (!map || !AMapApi) return false
+  const lng = Number(facility.lng)
+  const lat = Number(facility.lat)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false
+
+  clearFocus()
+  const zoom = Math.min(MAX_ZOOM, Math.max(3, options?.zoom ?? 18))
+  const label = e(options?.label || '查询结果')
+  const markerContent = htmlElement(
+    'map-focus-marker',
+    `<div class="map-focus-marker-pulse"></div><div class="map-focus-marker-label">${label}</div>`,
+  )
+  focusMarker = new AMapApi.Marker({
+    position: [lng, lat],
+    content: markerContent,
+    anchor: 'center',
+    title: `${facility.name || facility.ecode || '未命名'} · ${facility.type || '设施'}`,
+    zIndex: 7000,
+    clickable: true,
+    bubble: false,
+  })
+  map.add(focusMarker)
+  map.setZoomAndCenter(zoom, [lng, lat], false, 700)
+
+  const displayName = e(facility.name || facility.ecode || '未命名')
+  const facilityType = e(facility.type || '设施')
+  const community = e(facility.community || '未标注')
+  const ecode = facility.ecode ? `<div>编号：${e(facility.ecode)}</div>` : ''
+  focusInfoWindow = new AMapApi.InfoWindow({
+    content: `<div class="map-focus-info"><strong>${displayName}</strong><div>类型：${facilityType}</div><div>小区：${community}</div>${ecode}<div>坐标：${lng.toFixed(6)}, ${lat.toFixed(6)}</div></div>`,
+    offset: new AMapApi.Pixel(0, -32),
+    closeWhenClickMap: true,
+  })
+  focusOpenTimer = window.setTimeout(() => {
+    focusOpenTimer = null
+    if (!map || !focusInfoWindow || !focusMarker) return
+    try { focusInfoWindow.open(map, [lng, lat]) } catch {}
+  }, 720)
+  return true
+}
+
+defineExpose({ zoomToCommunityView, invalidate, fitActiveDataModule, focusOnFacility, clearFocus })
 
 onMounted(async () => {
   if (!mapRef.value) return
@@ -1520,6 +1587,7 @@ onMounted(async () => {
     window.addEventListener('inletparameterdatachange', handleInletParameterDataChange)
     isCommunityView = map.getZoom() < COMMUNITY_VIEW_ZOOM
     renderAll()
+    emit('ready')
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '高德地图加载失败'
     ElMessage.error(loadError.value)
@@ -1628,6 +1696,7 @@ onBeforeUnmount(() => {
   clearPotentialLayer()
   clearContinuityLayer()
   clearInletParameterLayer()
+  clearFocus()
   clearFacilitySelection()
   if (store.selectedUnit) store.selectUnit(null)
   if (store.hoveredUnit) store.hoverUnit(null)

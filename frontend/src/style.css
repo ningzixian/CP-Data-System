@@ -356,6 +356,89 @@ html.dark {
 
 #map { width: 100%; height: 100%; overflow: hidden; }
 
+@keyframes map-focus-pulse {
+  0%, 100% { transform: scale(.82); box-shadow: 0 0 0 0 rgba(245, 108, 108, .7); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 13px rgba(245, 108, 108, 0); }
+}
+
+.map-focus-marker {
+  position: relative;
+  width: 30px;
+  height: 30px;
+}
+
+.map-focus-marker-pulse {
+  width: 24px;
+  height: 24px;
+  margin: 3px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: #f56c6c;
+  box-shadow: 0 0 14px #f56c6c, 0 0 4px rgba(0, 0, 0, .4);
+  animation: map-focus-pulse 1.4s ease-out infinite;
+}
+
+.map-focus-marker-label {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 9px;
+  background: #f56c6c;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .4);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.map-focus-info {
+  min-width: 220px;
+  padding: 8px 6px;
+  color: #606266;
+  font: 12px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.map-focus-info strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #303133;
+  font-size: 15px;
+}
+
+.map-focus-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(760px, 88%);
+  padding: 8px 14px;
+  transform: translateX(-50%);
+  border-radius: 20px;
+  background: rgba(64, 158, 255, .95);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.map-focus-banner.is-success { background: rgba(103, 194, 58, .95); }
+.map-focus-banner.is-warning { background: rgba(230, 162, 60, .96); }
+.map-focus-banner.is-error { background: rgba(245, 108, 108, .96); }
+.map-focus-banner-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #fff; opacity: .9; }
+.map-focus-banner button { margin-left: 3px; padding: 0 3px; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 18px; line-height: 1; }
+.map-focus-banner-enter-active,
+.map-focus-banner-leave-active { transition: opacity .22s ease, transform .22s ease; }
+.map-focus-banner-enter-from,
+.map-focus-banner-leave-to { opacity: 0; transform: translate(-50%, -8px); }
+
 /* 数据模块卡片使用独立覆盖层，允许越过地图内部图层并显示在右上编辑工具栏之上。 */
 .data-module-card-overlay-layer {
   position: absolute;
