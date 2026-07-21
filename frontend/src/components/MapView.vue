@@ -245,9 +245,20 @@ function handleInspectionPhotoOver(event: MouseEvent) {
   document.body.appendChild(preview)
   inspectionPhotoPreview = preview
   inspectionPhotoPreviewSource = source
-  requestAnimationFrame(() => {
-    if (inspectionPhotoPreview === preview) preview.classList.add('is-visible')
-  })
+  const reveal = () => {
+    // 等待初始缩放状态至少完成一次绘制，避免缓存图片与首次解码图片的动画表现不一致。
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (inspectionPhotoPreview === preview) preview.classList.add('is-visible')
+    }))
+  }
+  if (typeof preview.decode === 'function') {
+    void preview.decode().catch(() => undefined).then(reveal)
+  } else if (preview.complete) {
+    reveal()
+  } else {
+    preview.addEventListener('load', reveal, { once: true })
+    preview.addEventListener('error', reveal, { once: true })
+  }
 }
 
 function handleInspectionPhotoOut(event: MouseEvent) {
@@ -278,6 +289,7 @@ interface ElevatedDataModuleCard {
   source: HTMLElement
   item: any
   portal: HTMLDivElement
+  restingZIndex: number
   offsetX: number
   offsetY: number
 }
@@ -302,6 +314,12 @@ function positionElevatedDataModuleCards() {
     portal.style.left = `${Number(pixel.getX()) + offsetX}px`
     portal.style.top = `${Number(pixel.getY()) + offsetY}px`
   })
+}
+
+function setElevatedDataModuleCardHovered(source: HTMLElement, hovered: boolean) {
+  const entry = elevatedDataModuleCards.find((card) => card.source === source)
+  if (!entry) return
+  entry.portal.style.zIndex = String(hovered ? DATA_MODULE_CARD_HOVER_Z_INDEX : entry.restingZIndex)
 }
 
 /**
@@ -333,13 +351,19 @@ function rebuildElevatedDataModuleCards() {
     const offsetX = cardRect.left + cardRect.width / 2 - mapRect.left - Number(pixel.getX())
     const offsetY = cardRect.bottom - mapRect.top - Number(pixel.getY())
     const portal = document.createElement('div')
+    const restingZIndex = source.classList.contains('is-card-active')
+      ? DATA_MODULE_CARD_HOVER_Z_INDEX
+      : DATA_MODULE_CARD_Z_INDEX + index
     portal.className = 'data-module-card-portal'
     portal.style.width = `${cardRect.width}px`
-    portal.style.zIndex = String(source.classList.contains('is-card-active') ? DATA_MODULE_CARD_HOVER_Z_INDEX : DATA_MODULE_CARD_Z_INDEX + index)
+    portal.style.zIndex = String(restingZIndex)
     portal.appendChild(card.cloneNode(true))
     source.classList.add('has-elevated-data-module-card')
     dataModuleCardLayerRef.value!.appendChild(portal)
-    elevatedDataModuleCards.push({ source, item, portal, offsetX, offsetY })
+    const elevatedCard = { source, item, portal, restingZIndex, offsetX, offsetY }
+    portal.addEventListener('mouseenter', () => setElevatedDataModuleCardHovered(source, true))
+    portal.addEventListener('mouseleave', () => setElevatedDataModuleCardHovered(source, false))
+    elevatedDataModuleCards.push(elevatedCard)
   })
   positionElevatedDataModuleCards()
 }
@@ -400,12 +424,16 @@ function bindDataModuleCardInteraction(content: HTMLElement, item: any, restingZ
   activationTarget.addEventListener('mouseenter', () => {
     activateDataModuleCard(content)
     item.setzIndex?.(DATA_MODULE_CARD_HOVER_Z_INDEX)
+    setElevatedDataModuleCardHovered(content, true)
   })
   if (focusMode) {
     if (content.classList.contains('is-card-active')) item.setzIndex?.(DATA_MODULE_CARD_HOVER_Z_INDEX)
     return
   }
-  content.addEventListener('mouseleave', () => item.setzIndex?.(restingZIndex))
+  content.addEventListener('mouseleave', () => {
+    item.setzIndex?.(restingZIndex)
+    setElevatedDataModuleCardHovered(content, false)
+  })
 }
 
 function marker(options: { position: [number, number]; className: string; html: string; size: [number, number]; zIndex: number; clickable?: boolean }) {

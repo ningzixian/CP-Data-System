@@ -439,11 +439,11 @@ html.dark {
 .map-focus-banner-enter-from,
 .map-focus-banner-leave-to { opacity: 0; transform: translate(-50%, -8px); }
 
-/* 数据模块卡片使用独立覆盖层，允许越过地图内部图层并显示在右上编辑工具栏之上。 */
+/* 数据模块卡片使用独立覆盖层，覆盖地图编辑工具栏和左下角图例。 */
 .data-module-card-overlay-layer {
   position: absolute;
   inset: 0;
-  z-index: 1000;
+  z-index: 1300;
   overflow: hidden;
   pointer-events: none;
 }
@@ -3644,9 +3644,10 @@ html.dark {
   object-fit: contain;
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -50%) scale(0.4);
+  transform: translate(-50%, -50%) scale(0.46);
   transform-origin: center;
-  transition: opacity 0.08s ease, transform 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.26s cubic-bezier(.2, .75, .25, 1);
+  will-change: opacity, transform;
 }
 
 .inspection-photo-page-preview.is-visible {
@@ -3841,7 +3842,46 @@ html.dark .inspection-photo-more {
   .inspection-photo-gallery-grid { grid-template-columns: 1fr; max-height: calc(100vh - 136px); }
 }
 
-/* 七项检测信息卡片的文字统一略微放大。 */
+/* 七项检测信息卡片统一扩大，保证地图演示时参数足够清晰。 */
+.insulation-map-marker { width: 276px; }
+.soil-map-marker { width: 288px; }
+.dc-map-marker { width: 304px; }
+.coating-map-marker { width: 316px; }
+.potential-map-marker { width: 272px; }
+.continuity-map-marker { width: 282px; }
+.inlet-parameter-map-marker { width: 292px; }
+
+.potential-map-marker.is-pending,
+.continuity-map-marker.is-pending,
+.inlet-parameter-map-marker.is-pending {
+  width: 176px;
+}
+
+.insulation-map-marker.data-module-focus-mode { --data-module-card-width: 276px; }
+.soil-map-marker.data-module-focus-mode { --data-module-card-width: 288px; }
+.dc-map-marker.data-module-focus-mode { --data-module-card-width: 304px; }
+.coating-map-marker.data-module-focus-mode { --data-module-card-width: 316px; }
+.potential-map-marker.data-module-focus-mode { --data-module-card-width: 272px; }
+.continuity-map-marker.data-module-focus-mode { --data-module-card-width: 282px; }
+.inlet-parameter-map-marker.data-module-focus-mode { --data-module-card-width: 292px; }
+.potential-map-marker.data-module-focus-mode.is-pending,
+.continuity-map-marker.data-module-focus-mode.is-pending,
+.inlet-parameter-map-marker.data-module-focus-mode.is-pending {
+  --data-module-card-width: 176px;
+}
+
+.insulation-map-card header,
+.soil-map-card header,
+.dc-map-card header,
+.coating-map-card header,
+.potential-map-card header,
+.continuity-map-card header,
+.inlet-parameter-map-card header {
+  height: 38px;
+  padding-right: 12px;
+  padding-left: 12px;
+}
+
 .insulation-map-card header span,
 .soil-map-card header span,
 .dc-map-card header span,
@@ -3856,7 +3896,7 @@ html.dark .inspection-photo-more {
 .potential-map-card header i,
 .continuity-map-card header i,
 .inlet-parameter-map-card header i {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .insulation-map-card header strong,
@@ -3866,7 +3906,7 @@ html.dark .inspection-photo-more {
 .potential-map-card header strong,
 .continuity-map-card header strong,
 .inlet-parameter-map-card header strong {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .insulation-map-values span,
@@ -3881,7 +3921,8 @@ html.dark .inspection-photo-more {
 .continuity-map-values > div,
 .continuity-map-coords,
 .inlet-parameter-map-values > div {
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 21px;
 }
 
 .insulation-map-values b,
@@ -3892,7 +3933,7 @@ html.dark .inspection-photo-more {
 .potential-map-values b,
 .continuity-map-values b,
 .inlet-parameter-map-values b {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .soil-map-primary span,
@@ -3900,35 +3941,58 @@ html.dark .inspection-photo-more {
 .potential-map-primary span,
 .continuity-map-primary span,
 .inlet-parameter-map-primary span {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .soil-map-primary b,
 .dc-map-primary b {
-  font-size: 18px;
+  font-size: 21px;
 }
 
 .potential-map-primary b,
 .continuity-map-primary b,
 .inlet-parameter-map-primary b {
-  font-size: 21px;
+  font-size: 23px;
 }
 
 .coating-map-location {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .potential-map-note,
 .continuity-map-note,
 .inlet-parameter-map-note {
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .inlet-parameter-map-readings span {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .inlet-parameter-map-readings b {
+  font-size: 11px;
+}
+
+.insulation-map-photo-empty,
+.soil-map-photo-empty,
+.dc-map-photo-empty,
+.coating-map-photo-empty,
+.potential-map-photo-empty,
+.continuity-map-photo-empty,
+.inlet-parameter-map-photo-empty {
+  font-size: 10px;
+}
+
+.potential-map-pending strong,
+.continuity-map-pending strong,
+.inlet-parameter-map-pending strong {
+  font-size: 12px;
+}
+
+.potential-map-pending span,
+.continuity-map-pending span,
+.inlet-parameter-map-pending span {
   font-size: 10px;
 }
 

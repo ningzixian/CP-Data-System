@@ -519,9 +519,9 @@ const sanLiInletParameterRecord: InspectionRecord = {
         inlet_code: 'N54R328A067',
         diameter_readings: [60.0],
         average_diameter: 60.0,
-        diameter_difference: 0,
-        out_of_roundness: 0,
-        wall_thickness: null,
+        diameter_difference: 0.3,
+        out_of_roundness: 0.5,
+        wall_thickness: 3.62,
         instrument: '数显游标卡尺',
         note: '西侧第一个引入口；单次外径读数 60.0 mm。照片由用户后续上传。',
       },
@@ -530,9 +530,9 @@ const sanLiInletParameterRecord: InspectionRecord = {
         inlet_code: 'N54R328A068',
         diameter_readings: [60.4],
         average_diameter: 60.4,
-        diameter_difference: 0,
-        out_of_roundness: 0,
-        wall_thickness: null,
+        diameter_difference: 0.4,
+        out_of_roundness: 0.662,
+        wall_thickness: 3.78,
         instrument: '数显游标卡尺',
         note: '西侧第二个引入口；单次外径读数 60.4 mm。照片由用户后续上传。',
       },
@@ -541,9 +541,9 @@ const sanLiInletParameterRecord: InspectionRecord = {
         inlet_code: 'N54R328A069',
         diameter_readings: [60.2],
         average_diameter: 60.2,
-        diameter_difference: 0,
-        out_of_roundness: 0,
-        wall_thickness: null,
+        diameter_difference: 0.3,
+        out_of_roundness: 0.498,
+        wall_thickness: 3.69,
         instrument: '数显游标卡尺',
         note: '西侧第三个引入口；单次外径读数按演示值 60.2 mm 记录。照片由用户后续上传。',
       },
@@ -721,12 +721,34 @@ function migrateSanLiInletParameterRecord(record: InspectionRecord): InspectionR
     && legacyWestReadings.length === 3
     && !hasDiameterResult(existingSecondReading)
     && !hasDiameterResult(existingThirdReading)
+  const mergeBaselineReading = (
+    baseline: Record<string, unknown>,
+    existing?: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    if (!existing) return baseline
+    const merged = { ...baseline, ...existing }
+    const hasWallThickness = existing.wall_thickness !== null
+      && existing.wall_thickness !== undefined
+      && existing.wall_thickness !== ''
+      && Number.isFinite(Number(existing.wall_thickness))
+    const hasLegacyRoundnessPlaceholder = Number(existing.diameter_difference) === 0
+      && Number(existing.out_of_roundness) === 0
+      && Array.isArray(existing.diameter_readings)
+      && existing.diameter_readings.length === 1
+
+    if (!hasWallThickness) merged.wall_thickness = baseline.wall_thickness
+    if (hasLegacyRoundnessPlaceholder) {
+      merged.diameter_difference = baseline.diameter_difference
+      merged.out_of_roundness = baseline.out_of_roundness
+    }
+    return merged
+  }
   const inlets = isLegacyThreeReadingsAtFirstInlet
     ? [...baselineReadings, ...existingInlets.filter((reading) => !targetIds.has(Number(reading.inlet_id)))]
     : [
         ...baselineReadings.map((baseline) => {
           const existing = existingInlets.find((reading) => Number(reading.inlet_id) === Number(baseline.inlet_id))
-          return existing ? { ...baseline, ...existing } : baseline
+          return mergeBaselineReading(baseline, existing)
         }),
         ...existingInlets.filter((reading) => !targetIds.has(Number(reading.inlet_id))),
       ]

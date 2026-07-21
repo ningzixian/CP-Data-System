@@ -182,7 +182,10 @@ function surveyPointTipHtml(point: SurveyPoint, photoContent: string, pinned = f
   const type = point.type === 'tee' ? '三通' : point.type === 'elbow' ? '弯头' : point.type === 'joint' ? '绝缘接头' : point.type === 'inlet' ? '引入口' : '普通点位'
   const note = point.note?.trim()
   const noteHtml = note ? `<div class="survey-point-hover-note"><span>备注</span><strong>${e(note)}</strong></div>` : ''
-  return `<div class="survey-point-hover-card${pinned ? ' is-pinned' : ''}"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data"><span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? `${e(point.current)} mA` : '未记录'}</strong></div>${noteHtml}</div>${photoContent}</div>`
+  const dataHtml = point.type === 'inlet'
+    ? `<span>经度</span><strong>${point.lng.toFixed(6)}</strong><span>纬度</span><strong>${point.lat.toFixed(6)}</strong>`
+    : `<span>埋深</span><strong>${point.depth !== undefined ? `${e(point.depth)} m` : '未记录'}</strong><span>电流</span><strong>${point.current !== undefined ? `${e(point.current)} mA` : '未记录'}</strong>`
+  return `<div class="survey-point-hover-card${pinned ? ' is-pinned' : ''}"><div class="survey-point-hover-main"><div class="survey-point-hover-title">${e(point.id)}</div><div class="survey-point-hover-type">${type}</div><div class="survey-point-hover-data">${dataHtml}</div>${noteHtml}</div>${photoContent}</div>`
 }
 
 function emptyHoverPhotoHtml(message: string): string {
