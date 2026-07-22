@@ -7,6 +7,7 @@
 export {
   type InsulationPhotoRecord as InspectionPhotoRecord,
   listInsulationPhotos as listInspectionPhotos,
+  listInsulationPhotosForOwners as listInspectionPhotosForOwners,
   addInsulationPhotos as addInspectionPhotos,
   deleteInsulationPhoto as deleteInspectionPhoto,
   deleteInsulationPhotos as deleteInspectionPhotos,

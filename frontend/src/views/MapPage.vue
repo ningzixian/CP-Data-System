@@ -17,7 +17,7 @@ import ElectricContinuityForm from '@/components/ElectricContinuityForm.vue'
 import InletParameterForm from '@/components/InletParameterForm.vue'
 import UnitInfoCard from '@/components/UnitInfoCard.vue'
 import UnitDataModules from '@/components/UnitDataModules.vue'
-import { soilResistivityPoints } from '@/utils/soilResistivity'
+import { soilResistivityPointsFromRecords } from '@/utils/soilResistivity'
 import { dcStrayCurrentPoints } from '@/utils/dcStrayCurrent'
 import { coatingDamagePoints } from '@/utils/coatingDetect'
 import { inletPotentialReadings, hasNaturalPotential } from '@/utils/pipeGroundPotential'
@@ -325,12 +325,11 @@ function selectUnit(u: CorrosionUnit) {
 watch(() => store.selectedUnit?.id, (newId, oldId) => {
   if (newId !== oldId) {
     // 数据模块展开时允许直接点击其他控制单元切换数据：
-    // 保留整组小方块，只取消当前具体模块的选中状态并刷新为新单元的数据。
+    // 保留整组小方块和当前具体模块，让新单元直接展示同一类检测卡片。
     if (dataModeActive.value) {
       clearDataModulesTimer()
       dataModulesClosing.value = false
       dataModulesVisible.value = true
-      activeDataModule.value = null
       drawerOpen.value = false
     }
     else resetDataModuleMode()
@@ -570,10 +569,9 @@ const selectedUnitInlets = computed(() => {
 const selectedUnitSoilPoints = computed(() => {
   const unitId = selectedUnit.value?.id
   if (!unitId) return []
-  const record = [...store.records]
+  const records = store.records
     .filter((item) => item.unit_id === unitId && item.item_code === 'SOIL_RESISTIVITY')
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
-  return soilResistivityPoints(record)
+  return soilResistivityPointsFromRecords(records)
 })
 
 const selectedUnitDcStrayPoints = computed(() => {

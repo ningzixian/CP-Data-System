@@ -30,8 +30,9 @@ export default defineConfig({
       // 后端联调时配置：所有 /api/* 请求代理到后端服务
       // 后端跑起来后改这里即可
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'https://192.168.20.40:3000',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

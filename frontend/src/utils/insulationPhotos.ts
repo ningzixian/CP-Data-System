@@ -16,6 +16,7 @@ const OWNER_INDEX = 'ownerKey'
 
 let databasePromise: Promise<IDBDatabase> | null = null
 const photoListRequests = new Map<string, Promise<InsulationPhotoRecord[]>>()
+const photoListCache = new Map<string, InsulationPhotoRecord[]>()
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -59,6 +60,8 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function listInsulationPhotos(ownerKey: string): Promise<InsulationPhotoRecord[]> {
+  const cached = photoListCache.get(ownerKey)
+  if (cached) return cached
   const pending = photoListRequests.get(ownerKey)
   if (pending) return pending
 
@@ -68,7 +71,9 @@ export async function listInsulationPhotos(ownerKey: string): Promise<Insulation
     const records = await requestResult(
       transaction.objectStore(STORE_NAME).index(OWNER_INDEX).getAll(ownerKey),
     ) as InsulationPhotoRecord[]
-    return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    const sorted = records.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    photoListCache.set(ownerKey, sorted)
+    return sorted
   })()
   photoListRequests.set(ownerKey, request)
   try {
@@ -76,6 +81,30 @@ export async function listInsulationPhotos(ownerKey: string): Promise<Insulation
   } finally {
     if (photoListRequests.get(ownerKey) === request) photoListRequests.delete(ownerKey)
   }
+}
+
+/** 在同一个 IndexedDB 事务中批量读取多个检测位置的照片。 */
+export async function listInsulationPhotosForOwners(ownerKeys: string[]): Promise<Map<string, InsulationPhotoRecord[]>> {
+  const keys = [...new Set(ownerKeys)]
+  const result = new Map<string, InsulationPhotoRecord[]>()
+  const missing = keys.filter((key) => {
+    const cached = photoListCache.get(key)
+    if (cached) result.set(key, cached)
+    return !cached
+  })
+  if (!missing.length) return result
+
+  const database = await openDatabase()
+  const transaction = database.transaction(STORE_NAME, 'readonly')
+  const index = transaction.objectStore(STORE_NAME).index(OWNER_INDEX)
+  const records = await Promise.all(missing.map(async (key) => {
+    const items = await requestResult(index.getAll(key)) as InsulationPhotoRecord[]
+    items.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    photoListCache.set(key, items)
+    return [key, items] as const
+  }))
+  records.forEach(([key, items]) => result.set(key, items))
+  return result
 }
 
 export async function addInsulationPhotos(ownerKey: string, inletId: number, files: File[]): Promise<void> {
@@ -98,6 +127,7 @@ export async function addInsulationPhotos(ownerKey: string, inletId: number, fil
     store.put(record)
   })
   await transactionDone(transaction)
+  photoListCache.delete(ownerKey)
 }
 
 export async function deleteInsulationPhoto(id: string): Promise<void> {
@@ -105,6 +135,7 @@ export async function deleteInsulationPhoto(id: string): Promise<void> {
   const transaction = database.transaction(STORE_NAME, 'readwrite')
   transaction.objectStore(STORE_NAME).delete(id)
   await transactionDone(transaction)
+  photoListCache.clear()
 }
 
 export async function deleteInsulationPhotos(ownerKey: string): Promise<void> {
@@ -120,4 +151,5 @@ export async function deleteInsulationPhotos(ownerKey: string): Promise<void> {
     cursor.continue()
   }
   await transactionDone(transaction)
+  photoListCache.delete(ownerKey)
 }

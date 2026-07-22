@@ -361,6 +361,25 @@ html.dark {
   50% { transform: scale(1.08); box-shadow: 0 0 0 13px rgba(245, 108, 108, 0); }
 }
 
+.logout-button {
+  height: 36px;
+  margin-left: 10px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.logout-button:hover { background: rgba(255, 255, 255, 0.13); }
+.logout-user { max-width: 110px; overflow: hidden; color: rgba(255, 255, 255, 0.72); text-overflow: ellipsis; white-space: nowrap; }
+
 .map-focus-marker {
   position: relative;
   width: 30px;
@@ -1899,7 +1918,7 @@ html.dark {
 
 /* ====== 右侧单元信息卡片（单击控制单元浮出，给领导看）======
  * - 横窄竖长：宽 280px，上 76px / 下 20px / 右 20px 留空
- * - 入场：translateX 从屏幕外滑入，0.4s 弹性曲线
+ * - 入场：translateX 从屏幕外快速滑入
  * - 与双击抽屉并存：单击 → 本卡片（快速浏览），双击 → 抽屉（完整录入）
  */
 .unit-info-card {
@@ -1918,20 +1937,19 @@ html.dark {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 /* Vue Transition 控制进场/离场（不再用 .open class）
- * - enter：弹性曲线 0.3s,首次打开有"入场感"
- * - leave：快收 0.15s,切换单元时快速腾位置(配合 mode="out-in" + :key="unit.id")
- * - 总切换时长 ≈ 0.45s,比单次 enter 的 0.4s 还紧凑,符合"快一点"诉求
+ * - enter：首次打开保留简短入场动画
+ * - leave：隐藏卡片时快速收起；切换单元只更新内容，不再先退场再进场
  * - 关键:默认 .unit-info-card 没有 transform/opacity,起点完全由 enter-from 控制
  */
 .slide-right-enter-active {
   transition:
-    transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1),
-    opacity 0.25s ease;
+    transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1),
+    opacity 0.16s ease;
 }
 .slide-right-leave-active {
   transition:
-    transform 0.15s ease-in,
-    opacity 0.15s ease-in;
+    transform 0.12s ease-in,
+    opacity 0.12s ease-in;
 }
 .slide-right-enter-from,
 .slide-right-leave-to {
@@ -3606,7 +3624,43 @@ html.dark {
 .potential-map-card,
 .continuity-map-card,
 .inlet-parameter-map-card {
+  position: relative;
   overflow: visible;
+}
+
+/* 卡片需要 overflow:visible 才能放大照片，因此用独立轮廓层补回顶部圆角实线。 */
+.insulation-map-card { --data-card-border: #b8c7da; }
+.soil-map-card { --data-card-border: #9ecbc4; }
+.dc-map-card { --data-card-border: #efb895; }
+.coating-map-card { --data-card-border: #f0a6aa; }
+.potential-map-card { --data-card-border: #7dd3fc; }
+.continuity-map-card { --data-card-border: #86efac; }
+.inlet-parameter-map-card { --data-card-border: #e9a8f2; }
+
+.insulation-map-card::after,
+.soil-map-card::after,
+.dc-map-card::after,
+.coating-map-card::after,
+.potential-map-card::after,
+.continuity-map-card::after,
+.inlet-parameter-map-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 8;
+  border: 1px solid var(--data-card-border);
+  border-radius: 11px;
+  pointer-events: none;
+}
+
+.insulation-map-card > header,
+.soil-map-card > header,
+.dc-map-card > header,
+.coating-map-card > header,
+.potential-map-card > header,
+.continuity-map-card > header,
+.inlet-parameter-map-card > header {
+  border-radius: 10px 10px 0 0;
 }
 
 .insulation-map-photos a,
@@ -4643,6 +4697,7 @@ html.dark .unit-data-module.is-enabled.is-active {
 
 html.dark .insulation-map-toolbar,
 html.dark .insulation-map-card {
+  --data-card-border: #36506f;
   background: rgba(15, 27, 45, 0.97);
   border-color: #36506f;
   color: var(--app-text);
@@ -4727,6 +4782,7 @@ html.dark .soil-map-toolbar .insulation-map-toolbar-icon {
 }
 
 html.dark .soil-map-card {
+  --data-card-border: #35615c;
   background: rgba(15, 31, 43, 0.98);
   border-color: #35615c;
 }
@@ -4802,7 +4858,7 @@ html.dark .soil-calculate-btn {
 }
 
 html.dark .dc-map-toolbar .insulation-map-toolbar-icon { background: #4b2517; color: #fb923c; }
-html.dark .dc-map-card { background: rgba(38, 24, 19, .98); border-color: #7b4933; }
+html.dark .dc-map-card { --data-card-border:#7b4933; background: rgba(38, 24, 19, .98); border-color: #7b4933; }
 html.dark .dc-map-card header { background: #4a281c; border-color: #70422e; }
 html.dark .dc-map-card header strong, html.dark .dc-form-summary strong, html.dark .dc-form .soil-point-heading strong, html.dark .dc-form .soil-point-fields h4 { color: #fed7aa; }
 html.dark .dc-map-primary, html.dark .dc-map-photo-empty, html.dark .dc-map-photos a { background: #3b2118; }
@@ -4811,14 +4867,14 @@ html.dark .dc-map-stats > span, html.dark .dc-stat-grid { border-color: #65402f;
 html.dark .dc-map-stats b, html.dark .dc-map-readings b { color: #f3d2bd; }
 html.dark .dc-form-summary { background: linear-gradient(135deg, #3b2118, #2d1b15); border-color: #74452f; }
 html.dark .coating-map-toolbar .insulation-map-toolbar-icon { background:#4b1f25; color:#ff7f86; border-color:#f05a62; }
-html.dark .coating-map-card { background:rgba(42,22,28,.98); border-color:#85414a; }
+html.dark .coating-map-card { --data-card-border:#85414a; background:rgba(42,22,28,.98); border-color:#85414a; }
 html.dark .coating-map-card header { background:#4c2229; border-color:#70333b; }
 html.dark .coating-map-card header strong,.dark .coating-map-location { color:#ffd1d4; }
 html.dark .coating-map-values > div { border-color:#64363c; }
 html.dark .coating-map-values b { color:#f4c5c8; }
 html.dark .coating-map-photo-empty,html.dark .coating-map-photos a { background:#381d22; border-color:#774049; color:#bd8e92; }
 html.dark .potential-map-toolbar .insulation-map-toolbar-icon { border-color:#38bdf8; background:#12364a; color:#7dd3fc; }
-html.dark .potential-map-card { border-color:#286a88; background:rgba(15,39,51,.98); }
+html.dark .potential-map-card { --data-card-border:#286a88; border-color:#286a88; background:rgba(15,39,51,.98); }
 html.dark .potential-map-card header { border-color:#255267; background:#12384b; }
 html.dark .potential-map-card header strong,html.dark .potential-map-primary b { color:#bae6fd; }
 html.dark .potential-map-primary { background:linear-gradient(135deg,#12384b,#102b39); }
@@ -4828,7 +4884,7 @@ html.dark .potential-map-note,html.dark .potential-map-photo-empty,html.dark .po
 html.dark .potential-map-pending { border-color:#37677a; background:rgba(18,43,54,.96); }
 html.dark .potential-map-pending strong { color:#b5d8e5; }
 html.dark .continuity-map-toolbar .insulation-map-toolbar-icon { border-color:#4ade80; background:#153d27; color:#86efac; }
-html.dark .continuity-map-card { border-color:#34734a; background:rgba(17,42,26,.98); }
+html.dark .continuity-map-card { --data-card-border:#34734a; border-color:#34734a; background:rgba(17,42,26,.98); }
 html.dark .continuity-map-card header { border-color:#2c5b3c; background:#173f28; }
 html.dark .continuity-map-card header strong,html.dark .continuity-map-primary b { color:#bbf7d0; }
 html.dark .continuity-map-primary { background:linear-gradient(135deg,#173f28,#122f20); }
@@ -4838,7 +4894,7 @@ html.dark .continuity-map-note,html.dark .continuity-map-photo-empty,html.dark .
 html.dark .continuity-map-pending { border-color:#3b704c; background:rgba(18,47,31,.96); }
 html.dark .continuity-map-pending strong { color:#b9dec5; }
 html.dark .inlet-parameter-map-toolbar .insulation-map-toolbar-icon { border-color:#e879f9;background:#44204b;color:#f0abfc; }
-html.dark .inlet-parameter-map-card { border-color:#74407c;background:rgba(43,21,47,.98); }.dark .inlet-parameter-map-card header { border-color:#63356a;background:#48204e; }.dark .inlet-parameter-map-card header strong,.dark .inlet-parameter-map-primary b { color:#f5d0fe; }.dark .inlet-parameter-map-primary { background:linear-gradient(135deg,#48204e,#35183a); }.dark .inlet-parameter-map-readings span,.dark .inlet-parameter-map-note,.dark .inlet-parameter-map-photo-empty,.dark .inlet-parameter-map-photos a { border-color:#68406e;background:#35183a;color:#b797bb; }.dark .inlet-parameter-map-values > div { border-color:#58385c; }.dark .inlet-parameter-map-values b,.dark .inlet-parameter-map-readings b { color:#ecc7f1; }.dark .inlet-parameter-map-pending { border-color:#704878;background:rgba(52,27,56,.96); }.dark .inlet-parameter-map-pending strong { color:#dec4e1; }
+html.dark .inlet-parameter-map-card { --data-card-border:#74407c;border-color:#74407c;background:rgba(43,21,47,.98); }.dark .inlet-parameter-map-card header { border-color:#63356a;background:#48204e; }.dark .inlet-parameter-map-card header strong,.dark .inlet-parameter-map-primary b { color:#f5d0fe; }.dark .inlet-parameter-map-primary { background:linear-gradient(135deg,#48204e,#35183a); }.dark .inlet-parameter-map-readings span,.dark .inlet-parameter-map-note,.dark .inlet-parameter-map-photo-empty,.dark .inlet-parameter-map-photos a { border-color:#68406e;background:#35183a;color:#b797bb; }.dark .inlet-parameter-map-values > div { border-color:#58385c; }.dark .inlet-parameter-map-values b,.dark .inlet-parameter-map-readings b { color:#ecc7f1; }.dark .inlet-parameter-map-pending { border-color:#704878;background:rgba(52,27,56,.96); }.dark .inlet-parameter-map-pending strong { color:#dec4e1; }
 
 @media (max-width: 1200px) {
   .insulation-inlet-editor {

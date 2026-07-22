@@ -389,6 +389,8 @@ export async function loadFacilities(): Promise<FacilitiesData> {
     lat: u.center[1],
     // address 动态拼:不再写死"南海家园七里"
     address: `${u.community} · 单元 ${u.name}`,
+    area_m2: u.area,
+    shape_length_m: u.length,
     polyline: u.rings[0].map(([lng, lat]) => [lat, lng] as [number, number]),
     inspection_progress: 0,
     inspection_status: 'pending',

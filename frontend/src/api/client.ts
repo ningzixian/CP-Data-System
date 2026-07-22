@@ -6,6 +6,16 @@
  */
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 
+export const AUTH_TOKEN_KEY = 'cp-data-system-token'
+
+export function saveAuthToken(token: string) {
+  window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+}
+
+export function clearAuthToken() {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY)
+}
+
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'  // 默认 true
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -14,11 +24,23 @@ const http: AxiosInstance = axios.create({
   timeout: 15000,
 })
 
+http.interceptors.request.use((config) => {
+  const token = window.localStorage.getItem(AUTH_TOKEN_KEY)
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 http.interceptors.response.use(
   (r) => r,
   (err) => {
-    const msg = err.response?.data?.detail || err.response?.data?.message
+    const msg = err.response?.data?.detail || err.response?.data?.message || err.response?.data?.error
     if (msg && err instanceof Error) err.message = msg
+    if (err.response?.status === 401 && err.config?.url !== '/api/auth/login') {
+      clearAuthToken()
+      window.dispatchEvent(new CustomEvent('auth:expired'))
+      const currentPath = window.location.hash.replace(/^#/, '') || '/map'
+      window.location.hash = `/login?redirect=${encodeURIComponent(currentPath || '/map')}`
+    }
     return Promise.reject(err)
   },
 )

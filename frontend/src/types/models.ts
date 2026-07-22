@@ -71,6 +71,10 @@ export interface CorrosionUnit {
   lng?: number                    // 中心点经度（GCJ-02 / WGS-84 看后端约定）
   lat?: number                    // 中心点纬度
   address?: string
+  /** 控制单元 CSV 已计算的面积，避免点击时重复遍历大型多边形。 */
+  area_m2?: number
+  /** 控制单元 CSV 已计算的边界长度。 */
+  shape_length_m?: number
   /** 管道走向轨迹（GCJ-02），用于在地图上画出该腐控单元的燃气管线 */
   polyline?: Array<[number, number]>
   inspection_progress: number     // 7 项检测整体进度 0-1

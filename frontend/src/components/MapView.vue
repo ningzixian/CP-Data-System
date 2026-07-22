@@ -6,9 +6,8 @@ import { useCpStore } from '@/stores/cp'
 import { loadAMap } from '@/map/amap-loader'
 import { escapeHtml as e } from '@/utils/html'
 import { inletInsulationReadings, insulationPhotoOwnerKey } from '@/utils/insulation'
-import { listInsulationPhotos } from '@/utils/insulationPhotos'
-import { listInspectionPhotos } from '@/utils/inspectionPhotos'
-import { hasSoilCoordinates, soilPhotoOwnerKey, soilResistivityPoints } from '@/utils/soilResistivity'
+import { listInspectionPhotosForOwners, type InspectionPhotoRecord } from '@/utils/inspectionPhotos'
+import { hasSoilCoordinates, soilPhotoOwnerKey, soilResistivityPointsFromRecords } from '@/utils/soilResistivity'
 import { dcStrayCurrentPoints, dcStrayPhotoOwnerKey, hasDcStrayCoordinates } from '@/utils/dcStrayCurrent'
 import { coatingDamagePhotoOwnerKey, coatingDamagePoints, hasCoatingDamageCoordinates } from '@/utils/coatingDetect'
 import { hasNaturalPotential, inletPotentialReadings, pipePotentialPhotoOwnerKey } from '@/utils/pipeGroundPotential'
@@ -115,6 +114,7 @@ const inletParameterPhotoUrls = new Set<string>()
 let inletParameterRenderSequence = 0
 let dataModuleFitSequence = 0
 let selectedUnitRenderFrame: number | null = null
+let selectedUnitFitTimer: number | null = null
 
 const inspectionPhotoSelector = [
   '.insulation-map-photos img',
@@ -633,7 +633,7 @@ function renderUnits() {
     polygon.on('click', () => {
       clearFacilitySelection()
       if (props.dataModuleMode) {
-        if (props.activeDataModule) emit('clear-data-module')
+        // 切换控制单元时保留当前模块，避免先清空七套图层再重复渲染。
         emit('select', unit)
         return
       }
@@ -718,6 +718,20 @@ function clearInsulationLayer() {
   insulationPhotoUrls.clear()
 }
 
+async function loadModulePhotos(
+  entries: Array<readonly [number, string]>,
+  moduleName: string,
+): Promise<Map<number, InspectionPhotoRecord[]>> {
+  if (!entries.length) return new Map()
+  try {
+    const photosByOwner = await listInspectionPhotosForOwners(entries.map(([, ownerKey]) => ownerKey))
+    return new Map(entries.map(([id, ownerKey]) => [id, photosByOwner.get(ownerKey) ?? []] as const))
+  } catch (error) {
+    console.warn(`[${moduleName}] 照片批量读取失败：`, error)
+    return new Map()
+  }
+}
+
 async function renderInsulation() {
   clearInsulationLayer()
   if (!map || props.activeDataModule !== 'JOINT_VERIFY' || !store.selectedUnit) return
@@ -729,16 +743,11 @@ async function renderInsulation() {
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletInsulationReadings(record)
 
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
-    try {
-      return [inlet.fid, await listInsulationPhotos(insulationPhotoOwnerKey(unitId, inlet.fid))] as const
-    } catch (error) {
-      console.warn(`[Insulation] 引入口 ${inlet.ecode || inlet.fid} 照片读取失败：`, error)
-      return [inlet.fid, []] as const
-    }
-  }))
+  const photosByInlet = await loadModulePhotos(
+    inlets.map((inlet) => [inlet.fid, insulationPhotoOwnerKey(unitId, inlet.fid)] as const),
+    'Insulation',
+  )
   if (sequence !== insulationRenderSequence || props.activeDataModule !== 'JOINT_VERIFY' || store.selectedUnit?.id !== unitId) return
-  const photosByInlet = new Map(photoEntries)
   const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(inlets)
 
@@ -800,20 +809,14 @@ async function renderSoilResistivity() {
   if (!map || props.activeDataModule !== 'SOIL_RESISTIVITY' || !store.selectedUnit) return
   const sequence = soilRenderSequence
   const unitId = store.selectedUnit.id
-  const record = [...store.records]
+  const records = store.records
     .filter((item) => item.unit_id === unitId && item.item_code === 'SOIL_RESISTIVITY')
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
-  const points = soilResistivityPoints(record).filter(hasSoilCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
-    try {
-      return [point.id, await listInspectionPhotos(soilPhotoOwnerKey(unitId, point.id))] as const
-    } catch (error) {
-      console.warn(`[Soil] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
-    }
-  }))
+  const points = soilResistivityPointsFromRecords(records).filter(hasSoilCoordinates)
+  const photosByPoint = await loadModulePhotos(
+    points.map((point) => [point.id, soilPhotoOwnerKey(unitId, point.id)] as const),
+    'Soil',
+  )
   if (sequence !== soilRenderSequence || props.activeDataModule !== 'SOIL_RESISTIVITY' || store.selectedUnit?.id !== unitId) return
-  const photosByPoint = new Map(photoEntries)
   const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(points)
 
@@ -829,7 +832,7 @@ async function renderSoilResistivity() {
     const complete = point.ground_rod_count !== null && point.ground_rod_spacing !== null && point.resistivity !== null
     const content = htmlElement(
       `soil-map-marker${complete ? ' is-complete' : ' is-pending'}${dataModuleFocusClass(singleCardMode, index, initialCardIndex)}`,
-      `<div class="soil-map-card"><header><span>测试位置</span><strong>${e(point.name)}</strong><i>${complete ? '数据完整' : '待录入'}</i></header><div class="soil-map-layout"><div class="soil-map-primary"><span>土壤电阻率</span><b>${formatSoilValue(point.resistivity, 'Ω·m')}</b></div><div class="soil-map-values"><div><span>地钎</span><b>${formatSoilValue(point.ground_rod_count, '根')}</b></div><div><span>间距</span><b>${formatSoilValue(point.ground_rod_spacing, 'm')}</b></div><div><span>电流 I</span><b>${formatSoilValue(point.test_current, 'mA')}</b></div><div><span>电压 U</span><b>${formatSoilValue(point.test_voltage, 'mV')}</b></div><div><span>电阻 R</span><b>${formatSoilValue(point.measured_resistance, 'Ω')}</b></div><div><span>系数 K</span><b>${formatSoilValue(point.geometric_coefficient)}</b></div></div><div class="soil-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div></div><div class="soil-map-pin"><span>${index + 1}</span></div>`,
+      `<div class="soil-map-card"><header><span>测试位置</span><strong>${e(point.name)}</strong><i>${complete ? '数据完整' : '待录入'}</i></header><div class="soil-map-layout"><div class="soil-map-primary"><span>土壤电阻率</span><b>${formatSoilValue(point.resistivity, 'Ω·m')}</b></div><div class="soil-map-values"><div><span>酸碱度</span><b>${formatSoilValue(point.ph, 'pH')}</b></div><div><span>地钎</span><b>${formatSoilValue(point.ground_rod_count, '根')}</b></div><div><span>间距</span><b>${formatSoilValue(point.ground_rod_spacing, 'm')}</b></div><div><span>电流 I</span><b>${formatSoilValue(point.test_current, 'mA')}</b></div><div><span>电压 U</span><b>${formatSoilValue(point.test_voltage, 'mV')}</b></div><div><span>电阻 R</span><b>${formatSoilValue(point.measured_resistance, 'Ω')}</b></div><div><span>系数 K</span><b>${formatSoilValue(point.geometric_coefficient)}</b></div></div><div class="soil-map-coords">${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}</div>${photoHtml}</div></div><div class="soil-map-pin"><span>${index + 1}</span></div>`,
     )
     content.addEventListener('click', (event) => event.stopPropagation())
     const item = new AMapApi.Marker({
@@ -869,16 +872,11 @@ async function renderDcStrayCurrent() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'DC_STRAY_CURRENT')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = dcStrayCurrentPoints(record).filter(hasDcStrayCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
-    try {
-      return [point.id, await listInspectionPhotos(dcStrayPhotoOwnerKey(unitId, point.id))] as const
-    } catch (error) {
-      console.warn(`[DC Stray] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
-    }
-  }))
+  const photosByPoint = await loadModulePhotos(
+    points.map((point) => [point.id, dcStrayPhotoOwnerKey(unitId, point.id)] as const),
+    'DC Stray',
+  )
   if (sequence !== dcStrayRenderSequence || props.activeDataModule !== 'DC_STRAY_CURRENT' || store.selectedUnit?.id !== unitId) return
-  const photosByPoint = new Map(photoEntries)
   const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(points)
 
@@ -926,16 +924,11 @@ async function renderCoatingDamage() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'COATING_DETECT')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = coatingDamagePoints(record).filter(hasCoatingDamageCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
-    try {
-      return [point.id, await listInspectionPhotos(coatingDamagePhotoOwnerKey(unitId, point.id))] as const
-    } catch (error) {
-      console.warn(`[Coating] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
-    }
-  }))
+  const photosByPoint = await loadModulePhotos(
+    points.map((point) => [point.id, coatingDamagePhotoOwnerKey(unitId, point.id)] as const),
+    'Coating',
+  )
   if (sequence !== coatingRenderSequence || props.activeDataModule !== 'COATING_DETECT' || store.selectedUnit?.id !== unitId) return
-  const photosByPoint = new Map(photoEntries)
   const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(points)
 
@@ -984,16 +977,11 @@ async function renderPipeGroundPotential() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'PIPE_GROUND_POTENTIAL')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletPotentialReadings(record)
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
-    try {
-      return [inlet.fid, await listInspectionPhotos(pipePotentialPhotoOwnerKey(unitId, inlet.fid))] as const
-    } catch (error) {
-      console.warn(`[Potential] ${inlet.ecode} 照片读取失败：`, error)
-      return [inlet.fid, []] as const
-    }
-  }))
+  const photosByInlet = await loadModulePhotos(
+    inlets.map((inlet) => [inlet.fid, pipePotentialPhotoOwnerKey(unitId, inlet.fid)] as const),
+    'Potential',
+  )
   if (sequence !== potentialRenderSequence || props.activeDataModule !== 'PIPE_GROUND_POTENTIAL' || store.selectedUnit?.id !== unitId) return
-  const photosByInlet = new Map(photoEntries)
   const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(inlets)
 
@@ -1043,16 +1031,11 @@ async function renderElectricContinuity() {
     .filter((item) => item.unit_id === unitId && item.item_code === 'ELECTRIC_CONTINUITY')
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const points = electricContinuityPoints(record).filter(hasElectricContinuityCoordinates)
-  const photoEntries = await Promise.all(points.map(async (point) => {
-    try {
-      return [point.id, await listInspectionPhotos(electricContinuityPhotoOwnerKey(unitId, point.id))] as const
-    } catch (error) {
-      console.warn(`[Continuity] ${point.name} 照片读取失败：`, error)
-      return [point.id, []] as const
-    }
-  }))
+  const photosByPoint = await loadModulePhotos(
+    points.map((point) => [point.id, electricContinuityPhotoOwnerKey(unitId, point.id)] as const),
+    'Continuity',
+  )
   if (sequence !== continuityRenderSequence || props.activeDataModule !== 'ELECTRIC_CONTINUITY' || store.selectedUnit?.id !== unitId) return
-  const photosByPoint = new Map(photoEntries)
   const singleCardMode = points.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(points)
 
@@ -1103,12 +1086,11 @@ async function renderInletParameters() {
   const inlets = (store.facilities?.inlets ?? []).filter((inlet) => inlet.unit_id === unitId).sort((a, b) => a.lng - b.lng || a.lat - b.lat)
   const record = [...store.records].filter((item) => item.unit_id === unitId && item.item_code === 'INLET_PARAM').sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   const readings = inletParameterReadings(record)
-  const photoEntries = await Promise.all(inlets.map(async (inlet) => {
-    try { return [inlet.fid, await listInspectionPhotos(inletParameterPhotoOwnerKey(unitId, inlet.fid))] as const }
-    catch (error) { console.warn(`[InletParameter] ${inlet.ecode} 照片读取失败：`, error); return [inlet.fid, []] as const }
-  }))
+  const photosByInlet = await loadModulePhotos(
+    inlets.map((inlet) => [inlet.fid, inletParameterPhotoOwnerKey(unitId, inlet.fid)] as const),
+    'InletParameter',
+  )
   if (sequence !== inletParameterRenderSequence || props.activeDataModule !== 'INLET_PARAM' || store.selectedUnit?.id !== unitId) return
-  const photosByInlet = new Map(photoEntries)
   const singleCardMode = inlets.length > DATA_MODULE_SINGLE_CARD_THRESHOLD
   const initialCardIndex = leftmostPointIndex(inlets)
 
@@ -1422,19 +1404,29 @@ function fitToAll() {
 }
 
 function dataModuleAxisShift(min: number, max: number, safeMin: number, safeMax: number) {
-  if (min < safeMin && max > safeMax) return (safeMin + safeMax - min - max) / 2
+  // 内容比安全区更宽/高时优先保证左侧和顶部不被导航浮层遮挡。
+  if (max - min > safeMax - safeMin) return safeMin - min
   if (min < safeMin) return safeMin - min
   if (max > safeMax) return safeMax - max
   return 0
 }
 
-/** 保持当前缩放层级，只平移地图，让数据点位及其信息卡避开页面浮层。 */
+/**
+ * 保持当前缩放层级并按优先级平移地图：
+ * 1. 当前控制单元中心尽量落在地图中心；
+ * 2. 继续平移，确保点位和信息卡避开左侧导航与顶部模块栏安全区。
+ */
 function fitActiveDataModule() {
   if (!map || !props.activeDataModule) return
   const code = props.activeDataModule
   const kind = DATA_MODULE_OVERLAY_KEYS[code]
   const candidates = kind ? overlays[kind] : []
-  if (!kind || !candidates.length) return
+  if (!kind) return
+  if (!candidates.length) {
+    const unit = store.selectedUnit
+    if (unit?.lng && unit.lat) map.setCenter([unit.lng, unit.lat], false, 300)
+    return
+  }
   const sequence = ++dataModuleFitSequence
 
   // 等待新模块卡片完成布局，再执行一次不改变缩放层级的平移动画。
@@ -1443,6 +1435,8 @@ function fitActiveDataModule() {
     const mapRect = mapRef.value.getBoundingClientRect()
     const moduleDeck = document.querySelector<HTMLElement>('.unit-data-modules.visible')
     const deckRect = moduleDeck?.getBoundingClientRect()
+    const communityPanel = document.querySelector<HTMLElement>('.map-side-panel')
+    const communityPanelRect = communityPanel?.getBoundingClientRect()
     const markers = [...mapRef.value.querySelectorAll<HTMLElement>(DATA_MODULE_MARKER_SELECTORS[kind])]
     if (!markers.length) return
     const cardBodies = markers.flatMap((marker) => [...marker.querySelectorAll<HTMLElement>(DATA_MODULE_CARD_BODY_SELECTOR)])
@@ -1464,7 +1458,7 @@ function fitActiveDataModule() {
       bottom: Math.max(...cardRects.map((rect) => rect.bottom)),
     }
     const deckBottom = deckRect ? deckRect.bottom + 20 : mapRect.top + 20
-    const cardSafeLeft = mapRect.left + 28
+    const cardSafeLeft = Math.max(mapRect.left + 28, (communityPanelRect?.right ?? mapRect.left) + 16)
     const cardSafeRight = Math.max(cardSafeLeft + 40, mapRect.right - 28)
     const cardSafeTop = Math.min(mapRect.bottom - 92, Math.max(mapRect.top + 20, deckBottom))
     const cardSafeBottom = Math.max(cardSafeTop + 40, mapRect.bottom - 28)
@@ -1476,10 +1470,24 @@ function fitActiveDataModule() {
 
     const xs = pixels.map((pixel) => Number(pixel.getX()))
     const ys = pixels.map((pixel) => Number(pixel.getY()))
-    let dx = dataModuleAxisShift(Math.min(...xs), Math.max(...xs), 32, mapRect.width - 32)
-    let dy = dataModuleAxisShift(Math.min(...ys), Math.max(...ys), 32, mapRect.height - 40)
-    dx += dataModuleAxisShift(cardBounds.left + dx, cardBounds.right + dx, cardSafeLeft, cardSafeRight)
-    dy += dataModuleAxisShift(cardBounds.top + dy, cardBounds.bottom + dy, cardSafeTop, cardSafeBottom)
+    const selectedUnit = store.selectedUnit
+    const unitPixel = selectedUnit?.lng && selectedUnit.lat
+      ? map.lngLatToContainer([selectedUnit.lng, selectedUnit.lat])
+      : null
+    const targetX = mapRect.width / 2
+    const targetY = mapRect.height / 2
+
+    // 第一优先级：先把控制单元放到地图几何中心。
+    let dx = unitPixel ? targetX - Number(unitPixel.getX()) : 0
+    let dy = unitPixel ? targetY - Number(unitPixel.getY()) : 0
+
+    // 第二优先级：完整处理点位与卡片安全区，不限制修正距离。
+    let safeDx = dataModuleAxisShift(Math.min(...xs) + dx, Math.max(...xs) + dx, 32, mapRect.width - 32)
+    let safeDy = dataModuleAxisShift(Math.min(...ys) + dy, Math.max(...ys) + dy, 32, mapRect.height - 40)
+    safeDx += dataModuleAxisShift(cardBounds.left + dx + safeDx, cardBounds.right + dx + safeDx, cardSafeLeft, cardSafeRight)
+    safeDy += dataModuleAxisShift(cardBounds.top + dy + safeDy, cardBounds.bottom + dy + safeDy, cardSafeTop, cardSafeBottom)
+    dx += safeDx
+    dy += safeDy
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
 
     const targetCenter = map.containerToLngLat(new AMapApi.Pixel(mapRect.width / 2 - dx, mapRect.height / 2 - dy))
@@ -1634,7 +1642,15 @@ watch(() => props.activeDataModule, async (code) => {
   dataModuleFitSequence++
   applyVisibility()
   await renderActiveDataModule(code)
-  if (code && code === props.activeDataModule) fitActiveDataModule()
+  if (code && code === props.activeDataModule) {
+    fitActiveDataModule()
+    return
+  }
+  // 取消数据小方块选择后，清除卡片偏移并让当前控制单元重新居中。
+  const unit = store.selectedUnit
+  if (!code && unit?.lng && unit.lat) {
+    map?.setCenter([unit.lng, unit.lat], false, 300)
+  }
 })
 watch(
   () => store.records.filter((record) => record.item_code === 'JOINT_VERIFY').map((record) => `${record.id}:${record.updated_at}`).join(','),
@@ -1680,9 +1696,21 @@ watch(() => store.selectedUnit?.id, (next, previous) => {
     setUnitStyle(next, 'selected')
   }
   if (selectedUnitRenderFrame !== null) cancelAnimationFrame(selectedUnitRenderFrame)
+  if (selectedUnitFitTimer !== null) {
+    window.clearTimeout(selectedUnitFitTimer)
+    selectedUnitFitTimer = null
+  }
+  const fitNotBefore = performance.now() + 320
   selectedUnitRenderFrame = requestAnimationFrame(() => {
     selectedUnitRenderFrame = null
-    void renderActiveDataModule()
+    void renderActiveDataModule().then(() => {
+      if (!props.activeDataModule) return
+      const delay = Math.max(0, fitNotBefore - performance.now())
+      selectedUnitFitTimer = window.setTimeout(() => {
+        selectedUnitFitTimer = null
+        fitActiveDataModule()
+      }, delay)
+    })
   })
 })
 watch(() => store.hoveredUnit?.id, (next, previous) => {
@@ -1695,11 +1723,13 @@ watch(() => store.selectedUnit, (unit) => {
   const center = map.getContainer().getBoundingClientRect()
   const distance = Math.hypot(current.getX() - center.width / 2, current.getY() - center.height / 2)
   if (distance < 50 && map.getZoom() >= DETAIL_ZOOM) return
-  map.setZoomAndCenter(DETAIL_ZOOM, [unit.lng, unit.lat], false, 600)
+  // 普通模式和数据模块模式都使用平滑定位；数据卡片完成布局后再做安全区微调。
+  map.setZoomAndCenter(DETAIL_ZOOM, [unit.lng, unit.lat], false, 300)
 }, { deep: false, flush: 'post' })
 
 onBeforeUnmount(() => {
   if (selectedUnitRenderFrame !== null) cancelAnimationFrame(selectedUnitRenderFrame)
+  if (selectedUnitFitTimer !== null) window.clearTimeout(selectedUnitFitTimer)
   mapRef.value?.removeEventListener('mouseover', handleInspectionPhotoOver)
   mapRef.value?.removeEventListener('mouseout', handleInspectionPhotoOut)
   mapRef.value?.removeEventListener('click', handleInspectionPhotoClick, true)

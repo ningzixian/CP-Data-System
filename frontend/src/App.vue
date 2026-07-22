@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCpStore } from '@/stores/cp'
+import { useAuthStore } from '@/stores/auth'
 import { applyTheme, getSavedTheme, type ThemeMode } from '@/utils/theme'
 
 const router = useRouter()
 const store = useCpStore()
+const auth = useAuthStore()
 const appearanceRef = ref<HTMLElement | null>(null)
 const appearanceOpen = ref(false)
 const theme = ref<ThemeMode>(getSavedTheme())
@@ -20,18 +22,36 @@ function closeAppearanceOnOutsideClick(event: MouseEvent) {
   if (!appearanceRef.value?.contains(event.target as Node)) appearanceOpen.value = false
 }
 
-onMounted(async () => {
+function logout() {
+  auth.logout()
+  router.replace('/login')
+}
+
+function handleExpiredAuth() {
+  auth.logout()
+}
+
+watch(
+  () => router.currentRoute.value.name,
+  (routeName) => {
+    if (routeName !== 'login' && auth.isAuthenticated) void store.loadAll()
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
   document.addEventListener('click', closeAppearanceOnOutsideClick)
-  await store.loadAll()
+  window.addEventListener('auth:expired', handleExpiredAuth)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeAppearanceOnOutsideClick)
+  window.removeEventListener('auth:expired', handleExpiredAuth)
 })
 </script>
 
 <template>
-  <div class="app-header">
+  <div v-if="router.currentRoute.value.name !== 'login'" class="app-header">
     <div class="logo">
       <span>🛡️</span>
       <span>阴极保护数据管理系统</span>
@@ -83,6 +103,10 @@ onBeforeUnmount(() => {
         </div>
       </Transition>
     </div>
+    <button class="logout-button" type="button" title="退出当前账号" @click="logout">
+      <span class="logout-user">{{ auth.username || '当前账号' }}</span>
+      <span>退出</span>
+    </button>
   </div>
   <router-view v-slot="{ Component }">
     <transition name="fade" mode="out-in">

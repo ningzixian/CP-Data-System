@@ -19,7 +19,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, Download, Delete, Edit, View } from '@element-plus/icons-vue'
 import { useCpStore } from '@/stores/cp'
 import { unitsApi } from '@/api/units'
-import { recordsApi } from '@/api/records'
 import { pipelinesApi } from '@/api/pipelines'
 import { importApi } from '@/api/import'
 import { loadZhiwenNetworkData, projectCpData } from '@/zhiwen/dataLoader'
@@ -236,13 +235,6 @@ function openRecordDialog(mode: RecordDialogMode, record: InspectionRecord | nul
   recordDialogVisible.value = true
 }
 async function handleRecordSaved() { await store.loadAll(true) }
-async function deleteRecord(row: InspectionRecord) {
-  try { await ElMessageBox.confirm(`确认删除「${row.item_name}」的记录？`, '提示', { type: 'warning' }) } catch { return }
-  await recordsApi.remove(row.id)
-  ElMessage.success('已删除')
-  await store.loadAll(true)
-}
-
 watch(
   () => [route.query.unit_id, route.query.item_code] as const,
   ([unitId, itemCode]) => {
@@ -485,7 +477,7 @@ async function uploadExcel(req: any) {
           <el-select v-model="recordStatusFilter" placeholder="状态" clearable style="width:120px">
             <el-option v-for="s in STATUS_OPTIONS.filter((x) => ['passed','exception','pending'].includes(x.value))" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
-          <el-button :icon="Plus" type="primary" @click="openRecordDialog('create')">新增记录</el-button>
+          <el-tag type="info" effect="plain">手机端后端数据 · 只读</el-tag>
           <div class="mg-spacer"></div>
           <el-button :icon="Download" @click="exportCurrentTab">导出当前页</el-button>
         </div>
@@ -514,11 +506,9 @@ async function uploadExcel(req: any) {
             <template #default="{ row }">{{ fmt(row.updated_at) }}</template>
           </el-table-column>
           <el-table-column prop="result_summary" label="摘要" min-width="180" show-overflow-tooltip />
-          <el-table-column label="操作" width="132" fixed="right">
+          <el-table-column label="操作" width="72" fixed="right">
             <template #default="{ row }">
               <el-button size="small" :icon="View" link @click="openRecordDialog('view', row)" />
-              <el-button size="small" :icon="Edit" link type="primary" @click="openRecordDialog('edit', row)" />
-              <el-button size="small" :icon="Delete" link type="danger" @click="deleteRecord(row)" />
             </template>
           </el-table-column>
         </el-table>

@@ -9,12 +9,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { pipelinesApi } from '@/api/pipelines'
-import { recordsApi } from '@/api/records'
-import { dashboardApi } from '@/api/dashboard'
 import { fetchItems } from '@/api/items'
+import { setReadonlyRecords } from '@/api/records'
+import { fetchMobileDetectionData, type MobileDetectionPoint, type MobileDetectionReport, type MobileTask } from '@/api/mobileDetection'
 import { loadFacilities, type FacilitiesData } from '@/utils/facilities'
 import { USE_MOCK } from '@/api/client'
 import { computeInspectionProgress, latestRecordsByItem } from '@/utils/inspection'
+import { adaptMobileDetectionData } from '@/utils/mobileDetectionAdapter'
+import { FSKZ755856_DEMO_RECORDS } from '@/mock/data'
 import type {
   Pipeline, CorrosionUnit, InspectionPoint, InspectionRecord,
   DashboardData, InspectionItemDef, RecordStatus,
@@ -28,6 +30,10 @@ export const useCpStore = defineStore('cp', () => {
   const items = ref<InspectionItemDef[]>([])
   const loading = ref(false)
   const loadError = ref('')
+  const mobileTasks = ref<MobileTask[]>([])
+  const mobilePoints = ref<MobileDetectionPoint[]>([])
+  const mobileReports = ref<MobileDetectionReport[]>([])
+  const unmatchedMobileReports = ref(0)
   let loaded = false
   let loadPromise: Promise<void> | null = null
 
@@ -61,18 +67,16 @@ export const useCpStore = defineStore('cp', () => {
       loading.value = true
       loadError.value = ''
       try {
-        const [fac, p, its, r] = await Promise.all([
+        const [fac, p, its] = await Promise.all([
           loadFacilities(),
           pipelinesApi.list(),
           fetchItems(),
-          recordsApi.list(),
         ])
 
         facilities.value = fac
         units.value = fac.units
         pipelines.value = p
         items.value = its
-        applyRecords(r)
 
         // 用真实绝缘接头生成 InspectionPoint 列表（store.points 给前端用）
         points.value = fac.joints
@@ -89,7 +93,8 @@ export const useCpStore = defineStore('cp', () => {
             created_at: new Date().toISOString(),
           }))
 
-        if (!USE_MOCK) dashboard.value = await dashboardApi.get()
+        await loadMobileRecords()
+        dashboard.value = computeDashboard()
         loaded = true
       } catch (error) {
         loadError.value = error instanceof Error ? error.message : '数据加载失败'
@@ -104,6 +109,39 @@ export const useCpStore = defineStore('cp', () => {
       await loadPromise
     } finally {
       loadPromise = null
+    }
+  }
+
+  async function loadMobileRecords() {
+    const mobile = await fetchMobileDetectionData()
+    mobileTasks.value = mobile.tasks
+    mobilePoints.value = mobile.points
+    mobileReports.value = mobile.reports
+    const adapted = adaptMobileDetectionData(mobile, units.value)
+    unmatchedMobileReports.value = adapted.unmatchedReports
+
+    // FSKZ755856 固定用于现场展示：该单元采用本地演示记录，其余单元采用手机端后端记录。
+    // 运行时按单元编码查找 ID，避免依赖 CSV 中可能变化的内部编号。
+    const showcaseUnit = units.value.find((unit) => unit.name.trim() === 'FSKZ755856')
+    const backendRecords = showcaseUnit
+      ? adapted.records.filter((record) => record.unit_id !== showcaseUnit.id)
+      : adapted.records
+    const showcaseRecords = showcaseUnit
+      ? FSKZ755856_DEMO_RECORDS.map((record) => ({
+          ...record,
+          unit_id: showcaseUnit.id,
+          result_data: structuredClone(record.result_data),
+        }))
+      : []
+    const mergedRecords = [...backendRecords, ...showcaseRecords]
+
+    setReadonlyRecords(mergedRecords)
+    applyRecords(mergedRecords)
+    if (!showcaseUnit) {
+      console.warn('[CP Store] 未找到展示单元 FSKZ755856，本次未注入本地演示记录')
+    }
+    if (adapted.unmatchedReports > 0) {
+      console.warn(`[CP Store] ${adapted.unmatchedReports} 条手机端报告因缺少任务、检测点或本地腐控单元而未展示`)
     }
   }
 
@@ -125,7 +163,8 @@ export const useCpStore = defineStore('cp', () => {
   }
 
   async function refreshRecords() {
-    applyRecords(await recordsApi.list())
+    await loadMobileRecords()
+    dashboard.value = computeDashboard()
   }
 
   /**
@@ -197,6 +236,7 @@ export const useCpStore = defineStore('cp', () => {
 
   return {
     pipelines, units, points, records, dashboard, items, loading, loadError,
+    mobileTasks, mobilePoints, mobileReports, unmatchedMobileReports,
     facilities, selectedUnit, hoveredUnit, stats,
     loadAll, refreshRecords, unitName, getItemStatus, selectUnit, hoverUnit,
     unitJointCount, unitInletCount,

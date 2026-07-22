@@ -556,16 +556,26 @@ const sanLiInletParameterRecord: InspectionRecord = {
   updated_at: '2026-07-17T09:30:00.000+08:00',
 }
 
-export const MOCK_RECORDS: InspectionRecord[] = [
-  ...nhjyRecords,
-  ...demoRecords,
-  ...sixLiRecords,
+/**
+ * FSKZ755856 专用展示数据。
+ *
+ * 该数组与其余历史 mock 数据分开导出，供真实后端模式下仅对这个
+ * 展示单元注入本地记录，避免其他单元重新使用模拟检测数据。
+ */
+export const FSKZ755856_DEMO_RECORDS: InspectionRecord[] = [
   sanLiSoilResistivityRecord,
   sanLiDcStrayCurrentRecord,
   sanLiCoatingDetectRecord,
   sanLiPipeGroundPotentialRecord,
   sanLiElectricContinuityRecord,
   sanLiInletParameterRecord,
+]
+
+export const MOCK_RECORDS: InspectionRecord[] = [
+  ...nhjyRecords,
+  ...demoRecords,
+  ...sixLiRecords,
+  ...FSKZ755856_DEMO_RECORDS,
 ]
 
 const MOCK_RECORDS_STORAGE_KEY = 'cp-data-system:mock-records'

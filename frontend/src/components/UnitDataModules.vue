@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useCpStore } from '@/stores/cp'
 import { latestRecordsByItem } from '@/utils/inspection'
+import { soilResistivityPointsFromRecords } from '@/utils/soilResistivity'
 import type { InspectionItemCode, InspectionRecord } from '@/types/models'
 
 withDefaults(defineProps<{
@@ -104,11 +105,31 @@ function formatRepresentativeValue(config: ModuleConfig, record?: InspectionReco
   return record.result_summary || (record.status === 'exception' ? '检测异常' : '已检测')
 }
 
-const modules = computed(() => MODULE_CONFIGS.map((config) => ({
-  ...config,
-  value: formatRepresentativeValue(config, latestRecords.value.get(config.code)),
-  status: latestRecords.value.get(config.code)?.status ?? 'pending',
-})))
+function formatSoilRepresentative(records: InspectionRecord[], latest?: InspectionRecord): string {
+  const points = soilResistivityPointsFromRecords(records)
+  const resistivity = points.find((point) => point.resistivity !== null)?.resistivity
+  const ph = points.find((point) => point.ph !== null)?.ph
+  const values = [
+    resistivity !== undefined ? `${resistivity} Ω·m` : '',
+    ph !== undefined ? `pH ${ph}` : '',
+  ].filter(Boolean)
+  return values.length ? values.join(' · ') : formatRepresentativeValue(MODULE_CONFIGS[1], latest)
+}
+
+const modules = computed(() => {
+  const unitId = store.selectedUnit?.id
+  const unitRecords = unitId ? store.records.filter((record) => record.unit_id === unitId) : []
+  return MODULE_CONFIGS.map((config) => {
+    const latest = latestRecords.value.get(config.code)
+    return {
+      ...config,
+      value: config.code === 'SOIL_RESISTIVITY'
+        ? formatSoilRepresentative(unitRecords.filter((record) => record.item_code === config.code), latest)
+        : formatRepresentativeValue(config, latest),
+      status: latest?.status ?? 'pending',
+    }
+  })
+})
 
 function moduleStyle(index: number): Record<string, string> {
   const reverseIndex = MODULE_CONFIGS.length - index

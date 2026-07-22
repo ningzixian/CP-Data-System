@@ -14,6 +14,7 @@ import {
   hasCompleteSoilReading,
   soilPhotoOwnerKey,
   soilResistivityPoints,
+  soilResistivityPointsFromRecords,
   type SoilResistivityPoint,
 } from '@/utils/soilResistivity'
 import type { InspectionRecord, InspectionRecordInput, RecordStatus } from '@/types/models'
@@ -63,6 +64,7 @@ function createPoint(index = points.value.length): SoilResistivityPoint {
     measured_resistance: null,
     geometric_coefficient: null,
     resistivity: null,
+    ph: null,
     note: '',
     photo_urls: [],
   }
@@ -107,6 +109,7 @@ async function load() {
     if (sequence !== loadSequence) return
     const latest = [...records].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
     applyRecord(latest)
+    points.value = soilResistivityPointsFromRecords(records)
     await loadPhotos(sequence)
   } catch (error) {
     if (sequence === loadSequence) ElMessage.error(`土壤电阻率数据加载失败：${error instanceof Error ? error.message : '未知错误'}`)
@@ -165,6 +168,7 @@ async function save() {
         point_count: points.value.length,
         completed_point_count: completedCount.value,
         resistivity: representative,
+        ph: points.value.find((point) => point.ph !== null)?.ph ?? null,
         test_points: points.value,
       },
       measured_value: representative,
@@ -272,6 +276,7 @@ onBeforeUnmount(() => {
             <label><span>实测电阻 R</span><el-input-number v-model="point.measured_resistance" :min="0" :precision="4" /><em>Ω</em></label>
             <label><span>几何系数 K</span><el-input-number v-model="point.geometric_coefficient" :min="0" :precision="4" /></label>
             <label class="soil-resistivity-result"><span>土壤电阻率 ρ</span><el-input-number v-model="point.resistivity" :min="0" :precision="3" /><em>Ω·m</em></label>
+            <label><span>土壤酸碱度</span><el-input-number v-model="point.ph" :min="0" :max="14" :precision="2" /><em>pH</em></label>
             <button type="button" class="soil-calculate-btn" @click="calculatePoint(point)">按 ρ = K × R 计算</button>
           </div>
 

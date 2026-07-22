@@ -17,6 +17,7 @@ export interface SoilResistivityPoint {
   measured_resistance: number | null
   geometric_coefficient: number | null
   resistivity: number | null
+  ph: number | null
   note: string
   photo_urls: SoilResistivityPhoto[]
 }
@@ -56,6 +57,7 @@ export function normalizeSoilResistivityPoint(value: unknown): SoilResistivityPo
     measured_resistance: numberOrNull(source.measured_resistance),
     geometric_coefficient: numberOrNull(source.geometric_coefficient),
     resistivity: numberOrNull(source.resistivity),
+    ph: numberOrNull(source.ph),
     note: String(source.note ?? ''),
     photo_urls: photoUrls,
   }
@@ -65,6 +67,12 @@ export function soilResistivityPoints(record?: InspectionRecord): SoilResistivit
   const source = record?.result_data?.test_points
   if (!Array.isArray(source)) return []
   return source.map(normalizeSoilResistivityPoint).filter((point): point is SoilResistivityPoint => !!point)
+}
+
+/** 汇总同一单元的全部后端报告，避免只显示最新一份报告中的测试点。 */
+export function soilResistivityPointsFromRecords(records: InspectionRecord[]): SoilResistivityPoint[] {
+  const points = records.flatMap((record) => soilResistivityPoints(record))
+  return [...new Map(points.map((point) => [point.id, point])).values()]
 }
 
 export function hasSoilCoordinates(point: SoilResistivityPoint): point is SoilResistivityPoint & { lng: number; lat: number } {

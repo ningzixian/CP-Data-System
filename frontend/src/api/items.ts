@@ -8,7 +8,13 @@ import { request } from './client'
 
 export async function fetchItems(): Promise<InspectionItemDef[]> {
   try {
-    return await request<InspectionItemDef[]>({ url: '/api/items' })
+    const backendItems = await request<InspectionItemDef[]>({ url: '/api/items' })
+    // 手机端的土壤酸碱值并入土壤电阻率模块，不再作为第 8 个独立模块展示。
+    return backendItems
+      .filter((item) => item.code !== ('SOIL_PH' as InspectionItemDef['code']))
+      .map((item) => item.code === 'SOIL_RESISTIVITY'
+        ? { ...item, name: '② 土壤电阻率检测' }
+        : item)
   } catch (error) {
     console.warn('[Items] 动态检测项加载失败，使用前端静态定义：', error)
     return INSPECTION_ITEMS

@@ -66,6 +66,9 @@ const inletCount = computed(() =>
  * - 转换后调用 utils/geo 里的现成函数(已经在 store.loadAll 用过,行为稳定)
  */
 const areaM2 = computed(() => {
+  if (Number.isFinite(unit.value?.area_m2)) {
+    return Math.round(unit.value!.area_m2!).toLocaleString('zh-CN')
+  }
   if (!unit.value?.polyline || unit.value.polyline.length < 3) return '—'
   const ring = unit.value.polyline.map(([lat, lng]) => [lng, lat] as [number, number])
   return Math.round(polygonAreaM2(ring)).toLocaleString('zh-CN')
@@ -84,6 +87,9 @@ function haversine(lng1: number, lat1: number, lng2: number, lat2: number): numb
 
 /** 管道长度(m) —— 累加 polyline 相邻两点距离 */
 const pipeLengthM = computed(() => {
+  if (Number.isFinite(unit.value?.shape_length_m)) {
+    return Math.round(unit.value!.shape_length_m!).toLocaleString('zh-CN')
+  }
   if (!unit.value?.polyline || unit.value.polyline.length < 2) return '—'
   let total = 0
   const ring = unit.value.polyline  // [[lat, lng], ...]
@@ -98,14 +104,13 @@ const pipeLengthM = computed(() => {
 </script>
 
 <template>
-  <Transition name="slide-right" mode="out-in" appear>
+  <Transition name="slide-right" appear>
     <!--
-      :key="unit.id" 让 Vue 把每次切换当成不同元素,触发 leave + enter(默认 v-if 不变 Vue 不重渲)
-      mode="out-in" 让 leave 完才 enter,避免新旧卡片重叠
+      切换控制单元时复用同一卡片并即时更新内容，只有显示/隐藏时播放动画。
       appear: 首次挂载也跑 enter 动画(组件常驻后首次 v-if=true)
       v-if: 由 visible prop + store.selectedUnit 共同控制(visible=false 时 leave 动画能跑)
     -->
-    <aside v-if="visible && unit" :key="unit.id" class="unit-info-card">
+    <aside v-if="visible && unit" class="unit-info-card">
     <!-- Header：单元名 + 地址 -->
     <header class="info-header">
       <div class="info-name">{{ unit.name }}</div>
