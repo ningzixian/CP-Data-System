@@ -131,6 +131,7 @@ async function loadData() {
       records: cp.records,
       communities: net.communities,
       topology: net.topology,
+      fieldTasks: (store as any).fieldTasks ?? [],
     }
     // 加载完显示数据源提示
     if (net.topology) {

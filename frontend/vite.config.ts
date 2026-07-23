@@ -4,9 +4,12 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import path from 'node:path'
+import sqlApi from './server/sqlApi.mjs'
 
 export default defineConfig({
   plugins: [
+    // SQL API 插件必须先注册，拦截 /api/sql/* 不让 proxy 转给现场检测后端
+    sqlApi(),
     vue(),
     AutoImport({ resolvers: [ElementPlusResolver()] }),
     Components({ resolvers: [ElementPlusResolver()] }),
@@ -27,11 +30,15 @@ export default defineConfig({
       ],
     },
     proxy: {
-      // 后端联调时配置：所有 /api/* 请求代理到后端服务
-      // 后端跑起来后改这里即可
+      // 现场检测后端（src.20270721）：HTTPS + 自签证书
+      //  - 前端用 /api/* 同源访问，避免浏览器 CORS + 证书警告
+      //  - secure: false 跳过上游证书校验（自签证书场景）
+      //  - changeOrigin: true 让后端看到正确的 Host header
+      //  - SQL 路由 /api/sql/* 已被 sqlApi 插件拦截，不会走到这里
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'https://192.168.20.40:3000',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

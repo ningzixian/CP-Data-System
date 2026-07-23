@@ -106,6 +106,18 @@ export interface ZhiwenData {
     rawPoints: any[]
     source: string
   } | null
+  /** 现场检测任务列表（来自 src.20270721 后端，由同步层填充） */
+  fieldTasks?: Array<{
+    id: string
+    name: string
+    area: string
+    unit: string
+    buildings: string[]
+    pressureLevel: string
+    pointsCount: number
+    createdAt: string
+    updatedAt: string
+  }>
 }
 
 export interface ChartSpec {
@@ -1136,6 +1148,99 @@ export function isTwoUnitCompare(text: string): { a: string; b: string } | null 
   return null
 }
 
+/**
+ * 现场检测任务查询识别
+ *  - 含 "区" 关键词（"A区"/"B区" 等），或显式 "现场检测" / "现场任务"
+ *  - 也匹配 "A区-B单位-1栋" 这种任务名片段
+ *  - 不触发的情况：纯数据集问句（"管线"/"调压箱"）不命中
+ *  - 注：中文里 \b 不工作，用 (?![A-Za-z\d]) 替代 word boundary
+ */
+export function isFieldTaskQuery(text: string): boolean {
+  // 显式关键词
+  if (/(现场检测|现场任务|检测任务|任务列表|有哪些任务|有几个任务|哪些任务|任务数量|任务数)/.test(text)) {
+    return true
+  }
+  // "A区" / "B区" / "1区" 等：单字母+区（后不能紧跟字母数字，避免 "x区域" 误匹配）
+  if (/([A-Za-z\d])\s*区(?![A-Za-z\d])/.test(text)) return true
+  // 任务名片段："A区-B单位-1栋" / "A区 1栋" / "FSKZ002-13栋"
+  if (/[A-Z]\s*区\s*[-—]?\s*[A-Z\d]/.test(text)) return true
+  // "B单位" / "A单位"
+  if (/[A-Z]\s*单位(?![A-Za-z\d])/.test(text)) return true
+  return false
+}
+
+/**
+ * 现场检测任务查询主体
+ *  - 模糊匹配 task.name / task.area
+ *  - 识别 query 中的具体过滤词（区/单位/栋）
+ */
+function buildFieldTaskResult(q: string, tasks: NonNullable<ZhiwenData['fieldTasks']>): QueryResult | null {
+  // 提取过滤关键词
+  const zoneMatch = q.match(/\b([A-Za-z\d])\s*区\b/)
+  const unitMatch = q.match(/[A-Za-z\d]\s*单位/)
+  const buildingMatch = q.match(/(\d+)\s*[#号]?\s*栋/)
+
+  let candidates = tasks
+  if (zoneMatch) {
+    const zone = zoneMatch[1].toUpperCase()
+    candidates = candidates.filter((t) => t.name.toUpperCase().includes(`${zone}区`))
+  }
+  if (unitMatch) {
+    candidates = candidates.filter((t) => t.name.toUpperCase().includes(unitMatch[0].toUpperCase().trim()))
+  }
+  if (buildingMatch) {
+    candidates = candidates.filter((t) => t.name.includes(buildingMatch[0]))
+  }
+  // 如果一个都没匹配上但有"现场检测"显式关键词，退回全部
+  if (candidates.length === 0) {
+    if (/(现场检测|现场任务|检测任务|任务列表|有哪些任务|有几个任务|哪些任务|任务数量|任务数)/.test(q)) {
+      candidates = tasks
+    } else {
+      return null  // 让其他分支接管
+    }
+  }
+
+  const isCount = isCountIntent(q)
+
+  if (isCount) {
+    return {
+      text: `现场检测任务共 **${candidates.length} 个**${zoneMatch ? `（${zoneMatch[1]}区）` : ''}。`,
+      totalCount: candidates.length,
+      table: {
+        headers: ['指标', '值'],
+        rows: [
+          { 指标: '任务总数', 值: `${candidates.length} 个` },
+          { 指标: '覆盖小区数', 值: `${new Set(candidates.map((t) => t.area)).size} 个` },
+          { 指标: '覆盖单元数', 值: `${new Set(candidates.map((t) => t.unit).filter(Boolean)).size} 个` },
+          { 指标: '总点位', 值: `${candidates.reduce((s, t) => s + t.pointsCount, 0)} 个` },
+        ],
+      },
+      sql: `现场检测任务查询 | filter=${zoneMatch ? `区=${zoneMatch[1]} ` : ''}${unitMatch ? `单位=${unitMatch[0]} ` : ''}${buildingMatch ? `栋=${buildingMatch[0]}` : ''}`,
+    }
+  }
+
+  return {
+    text: `✅ 现场检测任务${zoneMatch ? `（${zoneMatch[1]}区）` : ''}共找到 **${candidates.length} 个**：\n\n` +
+      candidates.slice(0, 20).map((t, i) =>
+        `${i + 1}. **${t.name}**\n   - 区域：${t.area}\n   - 关联单元：${t.unit || '—'}\n   - 楼栋：${t.buildings.join('、') || '—'}\n   - 点位数：**${t.pointsCount}**\n   - 创建时间：${t.createdAt.slice(0, 10)}`,
+      ).join('\n\n') +
+      (candidates.length > 20 ? `\n\n... 还有 ${candidates.length - 20} 个未显示` : ''),
+    totalCount: candidates.length,
+    table: {
+      headers: ['任务名', '区域', '关联单元', '楼栋', '点位数', '创建时间'],
+      rows: candidates.slice(0, 50).map((t) => ({
+        任务名: t.name,
+        区域: t.area,
+        关联单元: t.unit || '—',
+        楼栋: t.buildings.join('、') || '—',
+        点位数: t.pointsCount,
+        创建时间: t.createdAt.slice(0, 10),
+      })),
+    },
+    sql: `现场检测任务查询 | filter=${zoneMatch ? `区=${zoneMatch[1]} ` : ''}${unitMatch ? `单位=${unitMatch[0]} ` : ''}${buildingMatch ? `栋=${buildingMatch[0]}` : ''}`,
+  }
+}
+
 /** 两个 FSKZ 反查对比 — 实际找两个设施然后比较指标 */
 export function compareTwoUnits(a: string, b: string, data: ZhiwenData): {
   a: any | null; b: any | null; text: string; table?: any
@@ -1440,6 +1545,8 @@ export function scoreConfidence(text: string): { score: number; reasons: string[
   // 破损点：给到 0.4 保底，确保"破损点位置"/"破损点在哪"/"全部破损点"这类没其他维度的 query 也能达到 0.4 阈值走规则
   //  - 避免走 LLM 兜底导致 LLM 把破损点 key（DP-xxx）误传到 /map?focus= 触发"无法访问 key"错误
   if (isDamagePointQuery(text)) { score += 0.4; reasons.push('破损点') }
+  // 现场检测任务：保底 0.4，避免"a区"/"b单位"等纯关键词 query 走 LLM 兜底
+  if (isFieldTaskQuery(text)) { score += 0.4; reasons.push('现场检测任务') }
   return { score: Math.min(score, 1), reasons }
 }
 
@@ -2038,6 +2145,14 @@ export function runQuery(text: string, data: ZhiwenData): QueryResult {
       ].filter((o) => typeof o.lng === 'number' && typeof o.lat === 'number') : undefined,
       sql: `两单元对比 | ${twoUnit.a} vs ${twoUnit.b}`,
     }
+  }
+
+  // -1.5) 现场检测任务查询："A区" / "B单位" / "A区-B单位-1栋" / "现场检测任务" / "现场检测有哪些任务"
+  //      智问支持按 task.name / task.area 模糊搜
+  //      同步层已经把 fieldTasks 填到 data.fieldTasks
+  if (isFieldTaskQuery(q) && data.fieldTasks && data.fieldTasks.length > 0) {
+    const result = buildFieldTaskResult(q, data.fieldTasks)
+    if (result) return result
   }
 
   // -1) 单元编号反查：用户问"X号楼在哪" / "FSKZ755853 在哪个小区" / "N54R328A067 属于哪个楼"

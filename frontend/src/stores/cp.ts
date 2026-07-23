@@ -29,6 +29,19 @@ export const useCpStore = defineStore('cp', () => {
   const loading = ref(false)
   const loadError = ref('')
 
+  // 现场检测任务（由 syncFromField 填充，智问"现场检测任务查询"用）
+  const fieldTasks = ref<Array<{
+    id: string
+    name: string
+    area: string
+    unit: string
+    buildings: string[]
+    pressureLevel: string
+    pointsCount: number
+    createdAt: string
+    updatedAt: string
+  }>>([])
+
   // 现场设施数据（来自 CSV）
   const units = ref<CorrosionUnit[]>([])
   const points = ref<InspectionPoint[]>([])
@@ -90,6 +103,42 @@ export const useCpStore = defineStore('cp', () => {
       ElMessage.error(`数据加载失败：${loadError.value}`)
     } finally {
       loading.value = false
+    }
+  }
+
+  /**
+   * 把现场检测后端（src.20270721）的数据合并到 cp store
+   *  - 拉 tasks/points/reports → 转成 InspectionRecord
+   *  - 按 task.unit 名字匹配到前端腐控单元 → 更新 progress
+   *  - 调用方：App.vue onMounted（在 loadAll 之后）
+   */
+  async function syncFromField(): Promise<{ taskCount: number; recordCount: number; matchedUnits: number }> {
+    try {
+      // 动态 import：避免循环依赖（fieldSync 也 import store 接口）
+      // 优先 SQL snapshot（Vite middleware → MySQL/PG），失败回退 HTTP
+      try {
+        const { syncFieldFromSql } = await import('./fieldSyncFromSql')
+        const r = await syncFieldFromSql({
+          records: records.value as any,
+          units: units.value,
+          dashboard: dashboard.value,
+          fieldTasks: fieldTasks.value,
+        })
+        return { taskCount: r.taskCount, recordCount: r.recordCount, matchedUnits: r.matchedUnits }
+      } catch (e) {
+        console.warn('[CP Store] SQL 同步失败，回退 HTTP:', e)
+        const { syncFieldDataIntoCpStore } = await import('./fieldSync')
+        const r = await syncFieldDataIntoCpStore({
+          records: records.value as any,
+          units: units.value,
+          dashboard: dashboard.value,
+          fieldTasks: fieldTasks.value,
+        })
+        return { taskCount: r.taskCount, recordCount: r.recordCount, matchedUnits: r.matchedUnits }
+      }
+    } catch (e) {
+      console.warn('[CP Store] 现场检测同步失败（不影响其他功能）:', e)
+      return { taskCount: 0, recordCount: 0, matchedUnits: 0 }
     }
   }
 
@@ -183,8 +232,9 @@ export const useCpStore = defineStore('cp', () => {
 
   return {
     pipelines, units, points, records, dashboard, items, loading, loadError,
-    facilities, selectedUnit, hoveredUnit, stats,
-    loadAll, refreshRecords, unitName, getItemStatus, selectUnit, hoverUnit,
+    facilities, selectedUnit, hoveredUnit, stats, fieldTasks,
+    loadAll, refreshRecords, syncFromField,
+    unitName, getItemStatus, selectUnit, hoverUnit,
     unitJointCount, unitInletCount,
   }
 })

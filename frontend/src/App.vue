@@ -1,14 +1,27 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useCpStore } from '@/stores/cp'
 import { applyTheme, getSavedTheme, type ThemeMode } from '@/utils/theme'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const store = useCpStore()
+const auth = useAuthStore()
 const appearanceRef = ref<HTMLElement | null>(null)
 const appearanceOpen = ref(false)
 const theme = ref<ThemeMode>(getSavedTheme())
+
+/**
+ * 浮动快捷按钮（FAB）：在所有功能页右下角显示，点一下跳到 /field-tasks
+ *  - 在登录页隐藏（避免视觉干扰）
+ */
+const showFab = computed(() => route.path !== '/login')
+
+function goFieldTasks() {
+  router.push('/field-tasks')
+}
 
 function selectTheme(next: ThemeMode) {
   theme.value = next
@@ -23,6 +36,13 @@ function closeAppearanceOnOutsideClick(event: MouseEvent) {
 onMounted(async () => {
   document.addEventListener('click', closeAppearanceOnOutsideClick)
   await store.loadAll()
+  // 加载完前端数据后，再把现场检测后端的数据合并进来
+  //  - 失败不影响其他功能
+  //  - 用户已登录才同步（避免登录页空跑）
+  if (auth.isLoggedIn) {
+    const r = await store.syncFromField()
+    console.log('[App] 现场检测同步完成:', r)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -84,14 +104,77 @@ onBeforeUnmount(() => {
       </Transition>
     </div>
   </div>
+
   <router-view v-slot="{ Component }">
     <transition name="fade" mode="out-in">
       <component :is="Component" />
     </transition>
   </router-view>
+
+  <!--
+    全局浮动快捷按钮（FAB）：任意功能页右下角，点一下跳到 /field-tasks
+    - 只在 auth.isLoggedIn 为 true 时显示（避免登录页干扰）
+    - 当前页是 field-tasks 时隐藏（已经在目标页）
+  -->
+  <Transition name="fab-pop">
+    <button
+      v-if="showFab && auth.isLoggedIn && route.name !== 'field-tasks'"
+      class="fab-jump-to-field"
+      title="跳到现场检测任务"
+      @click="goFieldTasks"
+    >
+      <span class="fab-icon">🔌</span>
+      <span class="fab-label">现场检测</span>
+    </button>
+  </Transition>
 </template>
 
 <style>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* ===== 全局浮动快捷按钮（FAB） ===== */
+.fab-jump-to-field {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 20px 0 16px;
+  border: 0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #845ec2 0%, #d65db1 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(132, 94, 194, 0.4);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.fab-jump-to-field:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 10px 28px rgba(132, 94, 194, 0.55);
+}
+.fab-jump-to-field:active {
+  transform: translateY(0) scale(0.98);
+}
+.fab-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* FAB 进出动画 */
+.fab-pop-enter-active {
+  animation: fab-in 0.28s ease-out;
+}
+.fab-pop-leave-active {
+  animation: fab-in 0.18s ease-in reverse;
+}
+@keyframes fab-in {
+  0% { transform: translateY(20px) scale(0.85); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
 </style>

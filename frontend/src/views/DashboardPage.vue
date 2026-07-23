@@ -24,9 +24,10 @@ import DashboardOverview from './modules/DashboardOverview.vue'
 import DashboardNetwork from './modules/DashboardNetwork.vue'
 import DashboardInspection from './modules/DashboardInspection.vue'
 import DashboardProgress from './modules/DashboardProgress.vue'
+import DashboardSql from './modules/DashboardSql.vue'
 
 const store = useCpStore()
-const activeTab = ref<'overview' | 'network' | 'inspection' | 'progress'>('overview')
+const activeTab = ref<'overview' | 'network' | 'inspection' | 'progress' | 'sql'>('overview')
 const community = ref('全部')
 const dataLoading = ref(true)
 const data = ref<ZhiwenData>({
@@ -109,6 +110,9 @@ onMounted(loadAll)
       </el-tab-pane>
       <el-tab-pane label="🎯 检测进度" name="progress">
         <DashboardProgress :data="data" :community="community" />
+      </el-tab-pane>
+      <el-tab-pane label="🗄️ SQL 统计" name="sql">
+        <DashboardSql />
       </el-tab-pane>
     </el-tabs>
   </div>
